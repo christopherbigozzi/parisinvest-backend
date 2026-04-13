@@ -2,14 +2,13 @@ import re
 import os
 import requests
 import feedparser
+from bs4 import BeautifulSoup
 from datetime import datetime, timezone
-from scoring import calculer_score, calculer_marge
+from scoring import calculer_marge
 
-# Prix de référence fixe 18e (source DVF 2024)
 PRIX_REF_M2 = 9800
-
-# ScraperAPI key
 SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY", "")
+LBC_API_KEY = os.getenv("LBC_API_KEY", "")
 
 
 def get_prix_reference_dvf(code_postal="75018"):
@@ -17,234 +16,171 @@ def get_prix_reference_dvf(code_postal="75018"):
     return PRIX_REF_M2
 
 
-def scraper_url(url):
-    """Toutes les requêtes passent par ScraperAPI pour éviter les 403."""
+def fetch(url, rss=False):
+    """Récupère une URL via ScraperAPI ou directement."""
     if SCRAPER_API_KEY:
-        proxy_url = (
+        proxy = (
             f"https://api.scraperapi.com"
             f"?api_key={SCRAPER_API_KEY}"
             f"&url={requests.utils.quote(url, safe='')}"
             f"&render=false"
-            f"&keep_headers=true"
         )
-        headers = {"Accept": "application/rss+xml, application/xml, text/xml, */*"}
-        resp = requests.get(proxy_url, headers=headers, timeout=30)
+        if rss:
+            proxy += "&headers=%7B%22Accept%22%3A%22application%2Frss%2Bxml%2Capplication%2Fxml%2Ctext%2Fxml%2C*%2F*%22%7D"
+        resp = requests.get(proxy, timeout=30)
     else:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        resp = requests.get(url, headers=headers, timeout=15)
+        hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        if rss:
+            hdrs["Accept"] = "application/rss+xml, application/xml, text/xml, */*"
+        resp = requests.get(url, headers=hdrs, timeout=15)
     return resp
 
 
+def extraire_prix_surface(texte):
+    """Extrait prix et surface depuis un texte quelconque."""
+    prix_m = re.search(r"([\d\s\xa0]{3,10})\s*€", texte)
+    surf_m = re.search(r"(\d{2,4})\s*m[²2]", texte)
+    if not prix_m or not surf_m:
+        return None, None
+    try:
+        prix    = float(re.sub(r"[\s\xa0]", "", prix_m.group(1)))
+        surface = float(surf_m.group(1))
+        if prix < 50000 or surface < 10:
+            return None, None
+        return prix, surface
+    except Exception:
+        return None, None
+
+
 # ─────────────────────────────────────────────────────────
-# 1. PAP — Flux RSS officiel
+# 1. PAP — parse HTML direct (le RSS nécessite auth)
 # ─────────────────────────────────────────────────────────
 
-PAP_RSS = "https://www.pap.fr/annonce/ventes-appartements-paris-18e-g439?_feed=rss"
+PAP_URL = "https://www.pap.fr/annonce/ventes-appartements-paris-18e-g439"
 
 def scraper_pap(zone="montmartre"):
-    print("  [PAP] Scraping RSS...")
+    print("  [PAP] Scraping HTML...")
     annonces = []
     try:
-        resp = scraper_url(PAP_RSS)
+        resp = fetch(PAP_URL)
         print(f"  [PAP] Status {resp.status_code} — {len(resp.text)} chars")
-        feed = feedparser.parse(resp.text)
-        print(f"  [PAP] {len(feed.entries)} entrées dans le feed")
-        for entry in feed.entries[:40]:
-            a = _parser_pap(entry, zone)
-            if a:
-                annonces.append(a)
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # Chaque annonce PAP est dans un article ou div avec data-id
+        cards = soup.select("a.search-list-item-link, div.search-list-item, article[data-id]")
+        print(f"  [PAP] {len(cards)} cards trouvées")
+
+        for card in cards[:40]:
+            texte = card.get_text(" ", strip=True)
+            lien  = card.get("href", "") or card.select_one("a[href]", {}).get("href", "")
+            if lien and not lien.startswith("http"):
+                lien = "https://www.pap.fr" + lien
+
+            prix, surface = extraire_prix_surface(texte)
+            if not prix or not surface:
+                continue
+
+            titre_el = card.select_one("h2, h3, .item-title, .title")
+            titre = titre_el.get_text(strip=True) if titre_el else texte[:80]
+            dpe_m = re.search(r"DPE\s*:?\s*([A-G])", texte, re.IGNORECASE)
+            marge_nette, marge_pct = calculer_marge(surface, prix)
+
+            annonces.append({
+                "titre":          titre[:120],
+                "adresse":        "Paris 18e",
+                "surface":        surface,
+                "prix":           prix,
+                "prix_m2":        round(prix / surface),
+                "dpe":            dpe_m.group(1).upper() if dpe_m else "",
+                "source":         "PAP",
+                "url":            lien,
+                "date_publi":     datetime.now(timezone.utc).isoformat(),
+                "jours_en_ligne": 0,
+                "nb_baisses":     0,
+                "zone":           zone,
+                "marge_nette":    marge_nette,
+                "marge_pct":      marge_pct,
+            })
+
     except Exception as e:
         print(f"  [PAP] Erreur : {e}")
     print(f"  [PAP] {len(annonces)} annonces parsées")
     return annonces
 
-def _parser_pap(entry, zone):
-    try:
-        titre = entry.get("title", "")
-        desc  = entry.get("summary", "")
-        texte = titre + " " + desc
-
-        prix_m = re.search(r"([\d\s]{4,10})\s*€", texte)
-        surf_m = re.search(r"(\d{2,4})\s*m[²2]", texte)
-        if not prix_m or not surf_m:
-            return None
-
-        prix    = float(prix_m.group(1).replace(" ", "").replace("\xa0", ""))
-        surface = float(surf_m.group(1))
-        if prix < 50000 or surface < 10:
-            return None
-
-        dpe_m = re.search(r"DPE\s*:?\s*([A-G])", texte, re.IGNORECASE)
-        marge_nette, marge_pct = calculer_marge(surface, prix)
-
-        return {
-            "titre":          titre[:120],
-            "adresse":        "Paris 18e",
-            "surface":        surface,
-            "prix":           prix,
-            "prix_m2":        round(prix / surface),
-            "dpe":            dpe_m.group(1).upper() if dpe_m else "",
-            "source":         "PAP",
-            "url":            entry.get("link", ""),
-            "date_publi":     entry.get("published", datetime.now(timezone.utc).isoformat()),
-            "jours_en_ligne": 0,
-            "nb_baisses":     0,
-            "zone":           zone,
-            "marge_nette":    marge_nette,
-            "marge_pct":      marge_pct,
-        }
-    except Exception as e:
-        print(f"  [PAP] Parse erreur : {e}")
-        return None
-
 
 # ─────────────────────────────────────────────────────────
-# 2. Logic-Immo — RSS (moins restrictif que SeLoger)
+# 2. Bien'ici — parse HTML direct
 # ─────────────────────────────────────────────────────────
 
-LOGICIMMO_RSS = (
-    "https://www.logic-immo.com/vente-immobilier-paris-18eme-75018,75018"
-    "/options/groupprptypesids=1/page=1/output=rss"
-)
-
-def scraper_logicimmo(zone="montmartre"):
-    print("  [Logic-Immo] Scraping RSS...")
-    annonces = []
-    try:
-        resp = scraper_url(LOGICIMMO_RSS)
-        print(f"  [Logic-Immo] Status {resp.status_code} — {len(resp.text)} chars")
-        feed = feedparser.parse(resp.text)
-        print(f"  [Logic-Immo] {len(feed.entries)} entrées dans le feed")
-        for entry in feed.entries[:40]:
-            a = _parser_logicimmo(entry, zone)
-            if a:
-                annonces.append(a)
-    except Exception as e:
-        print(f"  [Logic-Immo] Erreur : {e}")
-    print(f"  [Logic-Immo] {len(annonces)} annonces parsées")
-    return annonces
-
-def _parser_logicimmo(entry, zone):
-    try:
-        titre = entry.get("title", "")
-        desc  = entry.get("summary", "")
-        texte = titre + " " + desc
-
-        prix_m = re.search(r"([\d\s\xa0]{4,10})\s*€", texte)
-        surf_m = re.search(r"(\d{2,4})\s*m[²2]?", texte)
-        if not prix_m or not surf_m:
-            return None
-
-        prix    = float(re.sub(r"[\s\xa0]", "", prix_m.group(1)))
-        surface = float(surf_m.group(1))
-        if prix < 50000 or surface < 10:
-            return None
-
-        dpe_m = re.search(r"[Cc]lasse\s*([A-G])|DPE\s*:?\s*([A-G])", texte)
-        dpe = ""
-        if dpe_m:
-            dpe = (dpe_m.group(1) or dpe_m.group(2) or "").upper()
-
-        marge_nette, marge_pct = calculer_marge(surface, prix)
-
-        return {
-            "titre":          titre[:120],
-            "adresse":        "Paris 18e",
-            "surface":        surface,
-            "prix":           prix,
-            "prix_m2":        round(prix / surface),
-            "dpe":            dpe,
-            "source":         "Logic-Immo",
-            "url":            entry.get("link", ""),
-            "date_publi":     entry.get("published", datetime.now(timezone.utc).isoformat()),
-            "jours_en_ligne": 0,
-            "nb_baisses":     0,
-            "zone":           zone,
-            "marge_nette":    marge_nette,
-            "marge_pct":      marge_pct,
-        }
-    except Exception as e:
-        print(f"  [Logic-Immo] Parse erreur : {e}")
-        return None
-
-
-# ─────────────────────────────────────────────────────────
-# 3. Bien'ici — RSS public
-# ─────────────────────────────────────────────────────────
-
-BIENICI_RSS = (
+BIENICI_URL = (
     "https://www.bienici.com/recherche/achat/paris-18eme-arrondissement-75018"
-    "?typesBien=appartement&_feed=rss"
+    "?typesBien=appartement&tri=publication-desc"
 )
 
 def scraper_bienici(zone="montmartre"):
-    print("  [Bien'ici] Scraping RSS...")
+    print("  [Bien'ici] Scraping HTML...")
     annonces = []
     try:
-        resp = scraper_url(BIENICI_RSS)
+        resp = fetch(BIENICI_URL)
         print(f"  [Bien'ici] Status {resp.status_code} — {len(resp.text)} chars")
-        feed = feedparser.parse(resp.text)
-        print(f"  [Bien'ici] {len(feed.entries)} entrées dans le feed")
-        for entry in feed.entries[:40]:
-            a = _parser_bienici(entry, zone)
-            if a:
-                annonces.append(a)
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        cards = soup.select("article.ad-list-item, div[data-test='adCard'], div.item")
+        print(f"  [Bien'ici] {len(cards)} cards trouvées")
+
+        for card in cards[:40]:
+            texte = card.get_text(" ", strip=True)
+            lien_el = card.select_one("a[href]")
+            lien = lien_el.get("href", "") if lien_el else ""
+            if lien and not lien.startswith("http"):
+                lien = "https://www.bienici.com" + lien
+
+            prix, surface = extraire_prix_surface(texte)
+            if not prix or not surface:
+                continue
+
+            titre_el = card.select_one("h2, h3, .title, .ad-title")
+            titre = titre_el.get_text(strip=True) if titre_el else texte[:80]
+            dpe_m = re.search(r"DPE\s*:?\s*([A-G])|[Cc]lasse\s+([A-G])", texte)
+            dpe = ""
+            if dpe_m:
+                dpe = (dpe_m.group(1) or dpe_m.group(2) or "").upper()
+
+            marge_nette, marge_pct = calculer_marge(surface, prix)
+
+            annonces.append({
+                "titre":          titre[:120],
+                "adresse":        "Paris 18e",
+                "surface":        surface,
+                "prix":           prix,
+                "prix_m2":        round(prix / surface),
+                "dpe":            dpe,
+                "source":         "Bienici",
+                "url":            lien,
+                "date_publi":     datetime.now(timezone.utc).isoformat(),
+                "jours_en_ligne": 0,
+                "nb_baisses":     0,
+                "zone":           zone,
+                "marge_nette":    marge_nette,
+                "marge_pct":      marge_pct,
+            })
+
     except Exception as e:
         print(f"  [Bien'ici] Erreur : {e}")
     print(f"  [Bien'ici] {len(annonces)} annonces parsées")
     return annonces
 
-def _parser_bienici(entry, zone):
-    try:
-        titre = entry.get("title", "")
-        desc  = entry.get("summary", "")
-        texte = titre + " " + desc
-
-        prix_m = re.search(r"([\d\s\xa0]{4,10})\s*€", texte)
-        surf_m = re.search(r"(\d{2,4})\s*m[²2]?", texte)
-        if not prix_m or not surf_m:
-            return None
-
-        prix    = float(re.sub(r"[\s\xa0]", "", prix_m.group(1)))
-        surface = float(surf_m.group(1))
-        if prix < 50000 or surface < 10:
-            return None
-
-        dpe_m = re.search(r"DPE\s*:?\s*([A-G])", texte, re.IGNORECASE)
-        marge_nette, marge_pct = calculer_marge(surface, prix)
-
-        return {
-            "titre":          titre[:120],
-            "adresse":        "Paris 18e",
-            "surface":        surface,
-            "prix":           prix,
-            "prix_m2":        round(prix / surface),
-            "dpe":            dpe_m.group(1).upper() if dpe_m else "",
-            "source":         "Bienici",
-            "url":            entry.get("link", ""),
-            "date_publi":     entry.get("published", datetime.now(timezone.utc).isoformat()),
-            "jours_en_ligne": 0,
-            "nb_baisses":     0,
-            "zone":           zone,
-            "marge_nette":    marge_nette,
-            "marge_pct":      marge_pct,
-        }
-    except Exception as e:
-        print(f"  [Bien'ici] Parse erreur : {e}")
-        return None
-
 
 # ─────────────────────────────────────────────────────────
-# 4. LeBonCoin — API partenaire (optionnel)
+# 3. LeBonCoin — API partenaire (optionnel)
 # ─────────────────────────────────────────────────────────
 
 LBC_API = "https://api.leboncoin.fr/api/adssearch/v4/list"
 
 def scraper_leboncoin(lbc_api_key="", zone="montmartre"):
     if not lbc_api_key:
-        print("  [LBC] Clé API manquante — source ignorée pour l'instant")
+        print("  [LBC] Clé API manquante — source ignorée")
         return []
-
     print("  [LBC] Scraping API partenaire...")
     annonces = []
     headers = {
@@ -259,9 +195,7 @@ def scraper_leboncoin(lbc_api_key="", zone="montmartre"):
             "location":    {"zipcode": ["75018"]},
             "ranges":      {"price": {"min": 80000, "max": 900000}}
         },
-        "limit":      35,
-        "sort_by":    "time",
-        "sort_order": "desc"
+        "limit": 35, "sort_by": "time", "sort_order": "desc"
     }
     try:
         resp = requests.post(LBC_API, headers=headers, json=payload, timeout=15)
@@ -285,7 +219,6 @@ def _parser_lbc(ad, zone):
         surface = float(attrs.get("square", 0))
         if prix < 50000 or surface < 10:
             return None
-
         marge_nette, marge_pct = calculer_marge(surface, prix)
         return {
             "titre":          ad.get("subject", "")[:120],
@@ -296,8 +229,7 @@ def _parser_lbc(ad, zone):
             "dpe":            attrs.get("energy_rate", ""),
             "source":         "LeBonCoin",
             "url":            f"https://www.leboncoin.fr/ad/{ad.get('list_id', '')}",
-            "date_publi":     ad.get("first_publication_date",
-                                     datetime.now(timezone.utc).isoformat()),
+            "date_publi":     ad.get("first_publication_date", datetime.now(timezone.utc).isoformat()),
             "jours_en_ligne": 0,
             "nb_baisses":     0,
             "zone":           zone,
@@ -317,7 +249,6 @@ def scraper_toutes_sources(zone="montmartre", lbc_api_key=""):
     print(f"\n--- Scraping toutes sources ({zone}) ---")
     toutes = []
     toutes += scraper_pap(zone)
-    toutes += scraper_logicimmo(zone)
     toutes += scraper_bienici(zone)
     toutes += scraper_leboncoin(lbc_api_key, zone)
     print(f"Total brut : {len(toutes)} annonces (avant déduplication)")
