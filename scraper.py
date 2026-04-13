@@ -5,8 +5,7 @@ from datetime import datetime, timezone
 from scoring import calculer_score, calculer_marge
 
 # ─────────────────────────────────────────────────────────
-# 1. PAP — Flux RSS officiel (particulier → particulier)
-#    Légal, gratuit, temps réel
+# 1. PAP — Flux RSS officiel
 # ─────────────────────────────────────────────────────────
 
 PAP_RSS = "https://www.pap.fr/annonce/ventes-appartements-paris-18e-g439?_feed=rss"
@@ -15,7 +14,9 @@ def scraper_pap(zone="montmartre"):
     print("  [PAP] Scraping RSS...")
     annonces = []
     try:
-        feed = feedparser.parse(PAP_RSS)
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; RSSReader/1.0)"}
+        resp = requests.get(PAP_RSS, headers=headers, timeout=15)
+        feed = feedparser.parse(resp.text)
         for entry in feed.entries[:40]:
             a = _parser_pap(entry, zone)
             if a:
@@ -67,10 +68,12 @@ def _parser_pap(entry, zone):
 
 # ─────────────────────────────────────────────────────────
 # 2. SeLoger — Flux RSS officiel
-#    Légal, gratuit, couvre agences + mandataires
 # ─────────────────────────────────────────────────────────
 
-SELOGER_RSS = "https://www.seloger.com/list.htm?idtypebien=1&idtt=2&cp=75018&tri=initial_date_desc&output=rss"
+SELOGER_RSS = (
+    "https://www.seloger.com/list.htm"
+    "?idtypebien=1&idtt=2&cp=75018&tri=initial_date_desc&output=rss"
+)
 
 def scraper_seloger(zone="montmartre"):
     print("  [SeLoger] Scraping RSS...")
@@ -129,27 +132,36 @@ def _parser_seloger(entry, zone):
 
 
 # ─────────────────────────────────────────────────────────
-# 3. DVF data.gouv.fr — API officielle État français
-#    Transactions réelles → prix de référence fiables
-#    Légal, gratuit, open data
+# 3. DVF — API Cerema (fonctionne sur Railway Hobby)
+#    Données officielles transactions immobilières
 # ─────────────────────────────────────────────────────────
 
-DVF_API = "https://apidf.datafoncier.cerema.fr/dvf_opendata/dvf_opendata/?code_insee=75118&page_size=200"
+DVF_API = "https://apidf.datafoncier.cerema.fr/dvf_opendata/dvf_opendata/"
 
-resp = requests.get(DVF_API, timeout=20)
-if resp.status_code != 200:
-    print(f"  [DVF] Erreur {resp.status_code} — prix ref par défaut utilisé")
-    return None
+def get_prix_reference_dvf(code_postal="75018"):
+    print("  [DVF] Récupération prix référence Cerema...")
+    try:
+        # Le 18e = code INSEE 75118
+        params = {
+            "code_insee": "75118",
+            "page_size":  200,
+        }
+        resp = requests.get(DVF_API, params=params, timeout=20)
+        if resp.status_code != 200:
+            print(f"  [DVF] Erreur {resp.status_code} — prix défaut utilisé")
+            return None
 
-mutations = resp.json().get("results", [])
-prix_m2_list = []
-for m in mutations:
-    surface = m.get("surface_reelle_bati") or 0
-    valeur  = m.get("valeur_fonciere") or 0
-    if surface > 15 and valeur > 0:
-        prix_m2_list.append(valeur / surface)
+        results = resp.json().get("results", [])
+        prix_m2_list = []
+        for r in results:
+            surface = r.get("surface_reelle_bati") or 0
+            valeur  = r.get("valeur_fonciere") or 0
+            type_l  = r.get("type_local", "")
+            if "Appartement" in type_l and surface > 15 and valeur > 0:
+                prix_m2_list.append(valeur / surface)
 
         if not prix_m2_list:
+            print("  [DVF] Aucune donnée — prix défaut utilisé")
             return None
 
         prix_m2_list.sort()
@@ -158,20 +170,19 @@ for m in mutations:
         return round(mediane)
 
     except Exception as e:
-        print(f"  [DVF] Erreur : {e}")
+        print(f"  [DVF] Erreur : {e} — prix défaut utilisé")
         return None
 
 
 # ─────────────────────────────────────────────────────────
-# 4. LeBonCoin — API partenaire officielle
-#    Demande d'accès : partenaires@leboncoin.fr
-#    La variable LBC_API_KEY reste vide tant que tu n'as pas la clé
+# 4. LeBonCoin — API partenaire (optionnel)
+#    Demande clé : partenaires@leboncoin.fr
 # ─────────────────────────────────────────────────────────
 
 LBC_API = "https://api.leboncoin.fr/api/adssearch/v4/list"
 
 def scraper_leboncoin(lbc_api_key="", zone="montmartre"):
-    if not lbc_api_key or lbc_api_key == "METS_TA_CLE_LBC_ICI":
+    if not lbc_api_key:
         print("  [LBC] Clé API manquante — source ignorée pour l'instant")
         return []
 
