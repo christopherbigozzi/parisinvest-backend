@@ -1,48 +1,56 @@
 import re
+import os
 import requests
 import feedparser
 from datetime import datetime, timezone
 from scoring import calculer_score, calculer_marge
 
-# Prix de référence fixe 18e arrondissement (source DVF 2024)
-# Mis à jour manuellement 1x/trimestre
+# Prix de référence fixe 18e (source DVF 2024)
 PRIX_REF_M2 = 9800
 
-# ─────────────────────────────────────────────────────────
-# Fonction DVF — retourne le prix fixe (Railway Hobby
-# bloque tous les DNS externes, on utilise la valeur stable)
-# ─────────────────────────────────────────────────────────
+# ScraperAPI — contourne les blocages 403
+SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY", "")
+
+def scraper_url(url):
+    """Passe toutes les requêtes via ScraperAPI pour éviter les 403."""
+    if SCRAPER_API_KEY:
+        proxy_url = (
+            f"https://api.scraperapi.com"
+            f"?api_key={SCRAPER_API_KEY}"
+            f"&url={requests.utils.quote(url, safe='')}"
+        )
+        resp = requests.get(proxy_url, timeout=30)
+    else:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        resp = requests.get(url, headers=headers, timeout=15)
+    return resp
+
 
 def get_prix_reference_dvf(code_postal="75018"):
-    print(f"  [DVF] Prix référence fixe utilisé : {PRIX_REF_M2} €/m²")
+    print(f"  [DVF] Prix référence fixe : {PRIX_REF_M2} €/m²")
     return PRIX_REF_M2
 
 
 # ─────────────────────────────────────────────────────────
-# 1. PAP — Flux RSS officiel
+# 1. PAP — Flux RSS
 # ─────────────────────────────────────────────────────────
 
-PAP_URLS = [
-    "https://www.pap.fr/annonce/ventes-appartements-paris-18e-g439?_feed=rss",
-    "https://www.pap.fr/annonce/ventes-appartements-paris-g37?_feed=rss",
-]
+PAP_RSS = "https://www.pap.fr/annonce/ventes-appartements-paris-18e-g439?_feed=rss"
 
 def scraper_pap(zone="montmartre"):
     print("  [PAP] Scraping RSS...")
     annonces = []
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    for url in PAP_URLS:
-        try:
-            resp = requests.get(url, headers=headers, timeout=15)
-            print(f"  [PAP] Status {resp.status_code} — {len(resp.text)} chars")
-            feed = feedparser.parse(resp.text)
-            print(f"  [PAP] {len(feed.entries)} entrées dans le feed")
-            for entry in feed.entries[:40]:
-                a = _parser_pap(entry, zone)
-                if a:
-                    annonces.append(a)
-        except Exception as e:
-            print(f"  [PAP] Erreur {url} : {e}")
+    try:
+        resp = scraper_url(PAP_RSS)
+        print(f"  [PAP] Status {resp.status_code} — {len(resp.text)} chars")
+        feed = feedparser.parse(resp.text)
+        print(f"  [PAP] {len(feed.entries)} entrées dans le feed")
+        for entry in feed.entries[:40]:
+            a = _parser_pap(entry, zone)
+            if a:
+                annonces.append(a)
+    except Exception as e:
+        print(f"  [PAP] Erreur : {e}")
     print(f"  [PAP] {len(annonces)} annonces parsées")
     return annonces
 
@@ -87,32 +95,28 @@ def _parser_pap(entry, zone):
 
 
 # ─────────────────────────────────────────────────────────
-# 2. SeLoger — Flux RSS officiel
+# 2. SeLoger — Flux RSS
 # ─────────────────────────────────────────────────────────
 
-SELOGER_URLS = [
-    "https://www.seloger.com/list.htm?idtypebien=1&idtt=2&cp=75018&output=rss",
-    "https://www.seloger.com/list.htm?idtypebien=1&idtt=2&cp=75018&tri=initial_date_desc&output=rss",
-]
+SELOGER_RSS = (
+    "https://www.seloger.com/list.htm"
+    "?idtypebien=1&idtt=2&cp=75018&tri=initial_date_desc&output=rss"
+)
 
 def scraper_seloger(zone="montmartre"):
     print("  [SeLoger] Scraping RSS...")
     annonces = []
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    for url in SELOGER_URLS:
-        try:
-            resp = requests.get(url, headers=headers, timeout=15)
-            print(f"  [SeLoger] Status {resp.status_code} — {len(resp.text)} chars")
-            feed = feedparser.parse(resp.text)
-            print(f"  [SeLoger] {len(feed.entries)} entrées dans le feed")
-            for entry in feed.entries[:40]:
-                a = _parser_seloger(entry, zone)
-                if a:
-                    annonces.append(a)
-            if annonces:
-                break
-        except Exception as e:
-            print(f"  [SeLoger] Erreur {url} : {e}")
+    try:
+        resp = scraper_url(SELOGER_RSS)
+        print(f"  [SeLoger] Status {resp.status_code} — {len(resp.text)} chars")
+        feed = feedparser.parse(resp.text)
+        print(f"  [SeLoger] {len(feed.entries)} entrées dans le feed")
+        for entry in feed.entries[:40]:
+            a = _parser_seloger(entry, zone)
+            if a:
+                annonces.append(a)
+    except Exception as e:
+        print(f"  [SeLoger] Erreur : {e}")
     print(f"  [SeLoger] {len(annonces)} annonces parsées")
     return annonces
 
@@ -232,7 +236,7 @@ def _parser_lbc(ad, zone):
 
 
 # ─────────────────────────────────────────────────────────
-# Fonction principale — toutes les sources
+# Fonction principale
 # ─────────────────────────────────────────────────────────
 
 def scraper_toutes_sources(zone="montmartre", lbc_api_key=""):
