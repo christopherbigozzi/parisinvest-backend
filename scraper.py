@@ -9,7 +9,7 @@ from scoring import calculer_score, calculer_marge
 #    Légal, gratuit, temps réel
 # ─────────────────────────────────────────────────────────
 
-PAP_RSS = "https://www.pap.fr/annonce/ventes-appartements-paris-18e-g439?_feed=atom"
+PAP_RSS = "https://www.pap.fr/annonce/ventes-appartements-paris-18e-g439?_feed=rss"
 
 def scraper_pap(zone="montmartre"):
     print("  [PAP] Scraping RSS...")
@@ -70,10 +70,7 @@ def _parser_pap(entry, zone):
 #    Légal, gratuit, couvre agences + mandataires
 # ─────────────────────────────────────────────────────────
 
-SELOGER_RSS = (
-    "https://www.seloger.com/list.htm"
-    "?idtypebien=1&idtt=2&cp=75018&tri=initial_date_desc&_output=rss"
-)
+SELOGER_RSS = "https://www.seloger.com/list.htm?idtypebien=1&idtt=2&cp=75018&tri=initial_date_desc&output=rss"
 
 def scraper_seloger(zone="montmartre"):
     print("  [SeLoger] Scraping RSS...")
