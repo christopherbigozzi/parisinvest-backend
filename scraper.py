@@ -134,30 +134,20 @@ def _parser_seloger(entry, zone):
 #    Légal, gratuit, open data
 # ─────────────────────────────────────────────────────────
 
-DVF_API = "https://data.etalab.gouv.fr/api/explore/v2.1/catalog/datasets/fr-etalab-dvf/records"
+DVF_API = "https://apidf.datafoncier.cerema.fr/dvf_opendata/dvf_opendata/?code_insee=75118&page_size=200"
 
-def get_prix_reference_dvf(code_postal="75018"):
-    """Calcule le prix/m² médian réel des 12 derniers mois dans la zone."""
-    print("  [DVF] Récupération prix référence...")
-    try:
-        params = {
-            "code_postal":      code_postal,
-            "nature_mutation":  "Vente",
-            "type_local":       "Appartement",
-            "page_size":        200,
-        }
-        resp = requests.get(DVF_API, params=params, timeout=20)
-        if resp.status_code != 200:
-            print(f"  [DVF] Erreur {resp.status_code}")
-            return None
+resp = requests.get(DVF_API, timeout=20)
+if resp.status_code != 200:
+    print(f"  [DVF] Erreur {resp.status_code} — prix ref par défaut utilisé")
+    return None
 
-        mutations = resp.json().get("results", [])
-        prix_m2_list = []
-        for m in mutations:
-            surface = m.get("surface_reelle_bati", 0)
-            valeur  = m.get("valeur_fonciere", 0)
-            if surface and valeur and surface > 15:
-                prix_m2_list.append(valeur / surface)
+mutations = resp.json().get("results", [])
+prix_m2_list = []
+for m in mutations:
+    surface = m.get("surface_reelle_bati") or 0
+    valeur  = m.get("valeur_fonciere") or 0
+    if surface > 15 and valeur > 0:
+        prix_m2_list.append(valeur / surface)
 
         if not prix_m2_list:
             return None
