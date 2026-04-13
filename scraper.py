@@ -4,26 +4,46 @@ import feedparser
 from datetime import datetime, timezone
 from scoring import calculer_score, calculer_marge
 
+# Prix de référence fixe 18e arrondissement (source DVF 2024)
+# Mis à jour manuellement 1x/trimestre
+PRIX_REF_M2 = 9800
+
+# ─────────────────────────────────────────────────────────
+# Fonction DVF — retourne le prix fixe (Railway Hobby
+# bloque tous les DNS externes, on utilise la valeur stable)
+# ─────────────────────────────────────────────────────────
+
+def get_prix_reference_dvf(code_postal="75018"):
+    print(f"  [DVF] Prix référence fixe utilisé : {PRIX_REF_M2} €/m²")
+    return PRIX_REF_M2
+
+
 # ─────────────────────────────────────────────────────────
 # 1. PAP — Flux RSS officiel
 # ─────────────────────────────────────────────────────────
 
-PAP_RSS = "https://www.pap.fr/annonce/ventes-appartements-paris-18e-g439?_feed=rss"
+PAP_URLS = [
+    "https://www.pap.fr/annonce/ventes-appartements-paris-18e-g439?_feed=rss",
+    "https://www.pap.fr/annonce/ventes-appartements-paris-g37?_feed=rss",
+]
 
 def scraper_pap(zone="montmartre"):
     print("  [PAP] Scraping RSS...")
     annonces = []
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; RSSReader/1.0)"}
-        resp = requests.get(PAP_RSS, headers=headers, timeout=15)
-        feed = feedparser.parse(resp.text)
-        for entry in feed.entries[:40]:
-            a = _parser_pap(entry, zone)
-            if a:
-                annonces.append(a)
-        print(f"  [PAP] {len(annonces)} annonces")
-    except Exception as e:
-        print(f"  [PAP] Erreur : {e}")
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    for url in PAP_URLS:
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            print(f"  [PAP] Status {resp.status_code} — {len(resp.text)} chars")
+            feed = feedparser.parse(resp.text)
+            print(f"  [PAP] {len(feed.entries)} entrées dans le feed")
+            for entry in feed.entries[:40]:
+                a = _parser_pap(entry, zone)
+                if a:
+                    annonces.append(a)
+        except Exception as e:
+            print(f"  [PAP] Erreur {url} : {e}")
+    print(f"  [PAP] {len(annonces)} annonces parsées")
     return annonces
 
 def _parser_pap(entry, zone):
@@ -33,7 +53,7 @@ def _parser_pap(entry, zone):
         texte = titre + " " + desc
 
         prix_m = re.search(r"([\d\s]{4,10})\s*€", texte)
-        surf_m = re.search(r"(\d{2,4})\s*m²", texte)
+        surf_m = re.search(r"(\d{2,4})\s*m[²2]", texte)
         if not prix_m or not surf_m:
             return None
 
@@ -70,25 +90,30 @@ def _parser_pap(entry, zone):
 # 2. SeLoger — Flux RSS officiel
 # ─────────────────────────────────────────────────────────
 
-SELOGER_RSS = (
-    "https://www.seloger.com/list.htm"
-    "?idtypebien=1&idtt=2&cp=75018&tri=initial_date_desc&output=rss"
-)
+SELOGER_URLS = [
+    "https://www.seloger.com/list.htm?idtypebien=1&idtt=2&cp=75018&output=rss",
+    "https://www.seloger.com/list.htm?idtypebien=1&idtt=2&cp=75018&tri=initial_date_desc&output=rss",
+]
 
 def scraper_seloger(zone="montmartre"):
     print("  [SeLoger] Scraping RSS...")
     annonces = []
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; RSSReader/1.0)"}
-        resp = requests.get(SELOGER_RSS, headers=headers, timeout=15)
-        feed = feedparser.parse(resp.text)
-        for entry in feed.entries[:40]:
-            a = _parser_seloger(entry, zone)
-            if a:
-                annonces.append(a)
-        print(f"  [SeLoger] {len(annonces)} annonces")
-    except Exception as e:
-        print(f"  [SeLoger] Erreur : {e}")
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    for url in SELOGER_URLS:
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            print(f"  [SeLoger] Status {resp.status_code} — {len(resp.text)} chars")
+            feed = feedparser.parse(resp.text)
+            print(f"  [SeLoger] {len(feed.entries)} entrées dans le feed")
+            for entry in feed.entries[:40]:
+                a = _parser_seloger(entry, zone)
+                if a:
+                    annonces.append(a)
+            if annonces:
+                break
+        except Exception as e:
+            print(f"  [SeLoger] Erreur {url} : {e}")
+    print(f"  [SeLoger] {len(annonces)} annonces parsées")
     return annonces
 
 def _parser_seloger(entry, zone):
@@ -98,7 +123,7 @@ def _parser_seloger(entry, zone):
         texte = titre + " " + desc
 
         prix_m = re.search(r"([\d\s\xa0]{4,10})\s*€", texte)
-        surf_m = re.search(r"(\d{2,4})\s*m²?", texte)
+        surf_m = re.search(r"(\d{2,4})\s*m[²2]?", texte)
         if not prix_m or not surf_m:
             return None
 
@@ -132,51 +157,7 @@ def _parser_seloger(entry, zone):
 
 
 # ─────────────────────────────────────────────────────────
-# 3. DVF — API Cerema (fonctionne sur Railway Hobby)
-#    Données officielles transactions immobilières
-# ─────────────────────────────────────────────────────────
-
-DVF_API = "https://apidf.datafoncier.cerema.fr/dvf_opendata/dvf_opendata/"
-
-def get_prix_reference_dvf(code_postal="75018"):
-    print("  [DVF] Récupération prix référence Cerema...")
-    try:
-        # Le 18e = code INSEE 75118
-        params = {
-            "code_insee": "75118",
-            "page_size":  200,
-        }
-        resp = requests.get(DVF_API, params=params, timeout=20)
-        if resp.status_code != 200:
-            print(f"  [DVF] Erreur {resp.status_code} — prix défaut utilisé")
-            return None
-
-        results = resp.json().get("results", [])
-        prix_m2_list = []
-        for r in results:
-            surface = r.get("surface_reelle_bati") or 0
-            valeur  = r.get("valeur_fonciere") or 0
-            type_l  = r.get("type_local", "")
-            if "Appartement" in type_l and surface > 15 and valeur > 0:
-                prix_m2_list.append(valeur / surface)
-
-        if not prix_m2_list:
-            print("  [DVF] Aucune donnée — prix défaut utilisé")
-            return None
-
-        prix_m2_list.sort()
-        mediane = prix_m2_list[len(prix_m2_list) // 2]
-        print(f"  [DVF] Prix médian 18e : {round(mediane)} €/m² ({len(prix_m2_list)} transactions)")
-        return round(mediane)
-
-    except Exception as e:
-        print(f"  [DVF] Erreur : {e} — prix défaut utilisé")
-        return None
-
-
-# ─────────────────────────────────────────────────────────
-# 4. LeBonCoin — API partenaire (optionnel)
-#    Demande clé : partenaires@leboncoin.fr
+# 3. LeBonCoin — API partenaire (optionnel)
 # ─────────────────────────────────────────────────────────
 
 LBC_API = "https://api.leboncoin.fr/api/adssearch/v4/list"
