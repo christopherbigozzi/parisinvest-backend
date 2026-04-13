@@ -137,7 +137,7 @@ def _parser_seloger(entry, zone):
 #    Légal, gratuit, open data
 # ─────────────────────────────────────────────────────────
 
-DVF_API = "https://api.dvf.etalab.gouv.fr/dvf/mutations/"
+DVF_API = "https://data.etalab.gouv.fr/api/explore/v2.1/catalog/datasets/fr-etalab-dvf/records"
 
 def get_prix_reference_dvf(code_postal="75018"):
     """Calcule le prix/m² médian réel des 12 derniers mois dans la zone."""
