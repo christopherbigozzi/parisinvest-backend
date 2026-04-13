@@ -43,7 +43,18 @@ def run():
     print(f"\nCycle terminé — {len(annonces)} annonces traitées, {alertes} alertes envoyées")
 
 # Lancer immédiatement au démarrage
-run()
+# DEBUG temporaire — affiche la structure HTML de PAP
+from scraper import fetch
+resp = fetch("https://www.pap.fr/annonce/ventes-appartements-paris-18e-g439")
+from bs4 import BeautifulSoup
+soup = BeautifulSoup(resp.text, "html.parser")
+# Affiche les 20 premiers tags avec classe pour trouver les bons sélecteurs
+tags = soup.find_all(class_=True)[:30]
+for t in tags:
+    classes = " ".join(t.get("class", []))
+    texte = t.get_text(strip=True)[:60]
+    print(f"  <{t.name} class='{classes}'> {texte}")
+
 
 # Puis toutes les heures
 schedule.every(1).hours.do(run)
