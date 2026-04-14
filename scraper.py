@@ -17,21 +17,18 @@ def get_prix_reference_dvf(code_postal="75018"):
 
 
 def fetch(url, rss=False):
-    """Récupère une URL via ScraperAPI ou directement."""
+    """Toutes les requêtes passent par ScraperAPI avec rendu JS."""
     if SCRAPER_API_KEY:
         proxy = (
             f"https://api.scraperapi.com"
             f"?api_key={SCRAPER_API_KEY}"
             f"&url={requests.utils.quote(url, safe='')}"
-            f"&render=false"
+            f"&render=true"
+            f"&wait=3000"
         )
-        if rss:
-            proxy += "&headers=%7B%22Accept%22%3A%22application%2Frss%2Bxml%2Capplication%2Fxml%2Ctext%2Fxml%2C*%2F*%22%7D"
-        resp = requests.get(proxy, timeout=30)
+        resp = requests.get(proxy, timeout=60)
     else:
         hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        if rss:
-            hdrs["Accept"] = "application/rss+xml, application/xml, text/xml, */*"
         resp = requests.get(url, headers=hdrs, timeout=15)
     return resp
 
