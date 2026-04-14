@@ -137,6 +137,7 @@ def _parser_melo(prop, zone):
 
         return {
             "titre":          titre[:120],
+            "melo_id":        prop.get("uuid") or "",
             "_lat":           gps_lat,
             "_lon":           gps_lon,
             "adresse":        adresse,
