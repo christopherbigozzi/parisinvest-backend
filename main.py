@@ -3,6 +3,7 @@ import time
 from datetime import datetime
 from config import ZONES, LBC_API_KEY
 from scraper import scraper_toutes_sources, get_prix_reference_dvf
+from scoring import calculer_score
 from database import sauvegarder_annonce, get_top_annonces
 from telegram import envoyer_alerte
 
@@ -19,27 +20,37 @@ def run():
 
     if not annonces:
         print("Aucune annonce récupérée ce cycle.")
-    else:
-        print(f"\nSauvegarde de {len(annonces)} annonces...")
-        for annonce in annonces:
-            try:
-                sauvegarder_annonce(annonce)
-            except Exception as e:
-                print(f"  Erreur sauvegarde : {e}")
+        return
 
-        print("\nVérification alertes...")
-        top = get_top_annonces(zone="montmartre", limite=10)
-        alertes = 0
-        for a in top:
-            if a["score"] >= 75:
-                envoyer_alerte(a)
-                alertes += 1
-        print(f"\nCycle terminé — {len(annonces)} annonces, {alertes} alertes")
+    # Calcul du score pour chaque annonce avant sauvegarde
+    for annonce in annonces:
+        annonce["score"] = calculer_score(annonce, zone="montmartre")
+
+    print(f"\nSauvegarde de {len(annonces)} annonces...")
+    sauvegardes = 0
+    for annonce in annonces:
+        try:
+            sauvegarder_annonce(annonce)
+            sauvegardes += 1
+        except Exception as e:
+            print(f"  Erreur sauvegarde : {e}")
+
+    print(f"  {sauvegardes}/{len(annonces)} annonces sauvegardées")
+
+    print("\nVérification alertes...")
+    top = get_top_annonces(zone="montmartre", limite=10)
+    alertes = 0
+    for a in top:
+        if (a.get("score") or 0) >= 75:
+            envoyer_alerte(a)
+            alertes += 1
+
+    print(f"\nCycle terminé — {sauvegardes} annonces, {alertes} alertes")
 
 run()
 
 schedule.every(5).minutes.do(run)
-print("\nScraper actif — tourne toutes les heures.")
+print("\nScraper actif — tourne toutes les 5 minutes.")
 
 while True:
     schedule.run_pending()
