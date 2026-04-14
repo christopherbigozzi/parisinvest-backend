@@ -6,7 +6,7 @@ from scoring import calculer_marge
 PRIX_REF_M2  = 9800
 MELO_API_KEY = os.getenv("MELO_API_KEY", "")
 LBC_API_KEY  = os.getenv("LBC_API_KEY", "")
-MELO_BASE    = "https://api.notif.immo/documents/properties"
+MELO_BASE = "https://preprod-api.notif.immo/documents/properties"
 
 
 def get_prix_reference_dvf(code_postal="75018"):
