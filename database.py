@@ -1,9 +1,12 @@
+import os
 import hashlib
 import requests
 from supabase import create_client
 from config import SUPABASE_URL, SUPABASE_KEY
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
+MELO_API_KEY = os.getenv("MELO_API_KEY", "")
+MELO_BASE    = "https://api.notif.immo/documents/properties"
 
 
 def generer_id(adresse, surface, prix):
@@ -12,57 +15,89 @@ def generer_id(adresse, surface, prix):
     return hashlib.md5(cle.encode()).hexdigest()
 
 
-def verifier_annonce_en_ligne(url):
-    """Verifie si une annonce est encore accessible en ligne."""
-    if not url:
-        return True
-    try:
-        resp = requests.head(url, timeout=8, allow_redirects=True,
-                             headers={"User-Agent": "Mozilla/5.0"})
-        if resp.status_code in (404, 410, 301):
-            return False
-        return True
-    except Exception:
-        return True
-
-
 def desactiver_annonces_expirees():
     """
-    Verifie toutes les annonces actives et desactive celles
-    dont l URL ne repond plus (404/410).
-    Lance un echantillon de 50 annonces par cycle pour ne pas surcharger.
+    Désactive les annonces qui ne sont plus valides via 3 signaux :
+    1. Melo marque le bien comme expired=true
+    2. Ancienneté > 90 jours sans baisse de prix (bien sorti du marché)
+    3. URL retourne 404/410
+
+    On vérifie 30 annonces par cycle, les plus anciennes en premier.
     """
-    print("  [Check] Verification annonces expirees...")
+    print("  [Check] Vérification annonces expirées...")
+
     try:
         result = supabase.table("annonces")\
-            .select("id, url, titre")\
+            .select("id, url, titre, melo_id, jours_en_ligne, nb_baisses")\
             .eq("actif", True)\
-            .not_.is_("url", "null")\
-            .neq("url", "")\
             .order("date_maj", desc=False)\
-            .limit(50)\
+            .limit(30)\
             .execute()
 
-        annonces = result.data or []
+        annonces   = result.data or []
         desactivees = 0
 
         for a in annonces:
-            if not verifier_annonce_en_ligne(a.get("url", "")):
+            raison = _est_expirée(a)
+            if raison:
                 supabase.table("annonces")\
                     .update({"actif": False})\
                     .eq("id", a["id"])\
                     .execute()
                 desactivees += 1
-                print(f"  [Check] Expiree : {a.get('titre', '')[:50]}")
+                print(f"  [Check] Désactivée ({raison}) : {a.get('titre','')[:50]}")
 
-        print(f"  [Check] {len(annonces)} verifiees, {desactivees} desactivees")
+        print(f"  [Check] {len(annonces)} vérifiées, {desactivees} désactivées")
 
     except Exception as e:
         print(f"  [Check] Erreur : {e}")
 
 
+def _est_expirée(a):
+    """
+    Retourne la raison d'expiration ou None si l'annonce est encore valide.
+    """
+    # ── Signal 1 : Melo a marqué le bien comme expired ───────────────────────
+    melo_id = a.get("melo_id") or ""
+    if MELO_API_KEY and melo_id:
+        try:
+            resp = requests.get(
+                MELO_BASE,
+                params={"ids[]": melo_id, "expired": "true"},
+                headers={"X-API-KEY": MELO_API_KEY},
+                timeout=10
+            )
+            if resp.status_code == 200:
+                total = resp.json().get("hydra:totalItems", -1)
+                if total > 0:
+                    return "Melo expired=true"
+        except Exception:
+            pass
+
+    # ── Signal 2 : ancienneté > 90 jours sans aucune baisse de prix ──────────
+    jours   = a.get("jours_en_ligne") or 0
+    baisses = a.get("nb_baisses") or 0
+    if jours > 90 and baisses == 0:
+        return f"Ancienneté {jours}j sans baisse"
+
+    # ── Signal 3 : URL retourne 404 ou 410 ───────────────────────────────────
+    url = a.get("url") or ""
+    if url:
+        try:
+            resp = requests.head(
+                url, timeout=6, allow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            if resp.status_code in (404, 410):
+                return f"URL {resp.status_code}"
+        except Exception:
+            pass
+
+    return None
+
+
 def sauvegarder_annonce(annonce):
-    """Sauvegarde une annonce, met a jour si elle existe deja."""
+    """Sauvegarde une annonce, met à jour si elle existe déjà."""
     annonce_id = generer_id(
         annonce.get("adresse", ""),
         annonce.get("surface", 0),
@@ -79,7 +114,7 @@ def sauvegarder_annonce(annonce):
                 "annonce_id": annonce_id,
                 "prix": ancien_prix
             }).execute()
-            print(f"  Baisse detectee : {ancien_prix} -> {annonce['prix']} EUR")
+            print(f"  Baisse détectée : {ancien_prix} → {annonce['prix']} €")
 
         supabase.table("annonces").update({
             "prix":       annonce["prix"],
@@ -88,12 +123,13 @@ def sauvegarder_annonce(annonce):
             "marge_nette": annonce["marge_nette"],
             "marge_pct":  annonce["marge_pct"],
             "photo":      annonce.get("photo"),
+            "melo_id":    annonce.get("melo_id"),
             "actif":      True,
             "date_maj":   "now()"
         }).eq("id", annonce_id).execute()
     else:
         supabase.table("annonces").insert(annonce).execute()
-        print(f"  Nouvelle annonce : {annonce['titre']} — {annonce['prix']} EUR")
+        print(f"  Nouvelle annonce : {annonce['titre']} — {annonce['prix']} €")
 
 
 def get_top_annonces(zone="montmartre", limite=5):
