@@ -38,7 +38,7 @@ def run():
 
 run()
 
-schedule.every(1).hours.do(run)
+schedule.every(5).minutes.do(run)
 print("\nScraper actif — tourne toutes les heures.")
 
 while True:
