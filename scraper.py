@@ -2,88 +2,9 @@ import os
 import requests
 from datetime import datetime, timezone
 from scoring import calculer_marge
+from zone_filter import est_dans_zone
 
 PRIX_REF_M2  = 9800
-
-# ─────────────────────────────────────────────────────────
-# Filtre géographique — ray-casting algorithm
-# Vérifie qu'un bien est bien dans le polygone Montmartre
-# ─────────────────────────────────────────────────────────
-
-def point_in_polygon(lat, lon, polygon):
-    """Retourne True si (lat, lon) est dans le polygone."""
-    n = len(polygon)
-    inside = False
-    j = n - 1
-    for i in range(n):
-        lat_i, lon_i = polygon[i][0], polygon[i][1]
-        lat_j, lon_j = polygon[j][0], polygon[j][1]
-        if ((lon_i > lon) != (lon_j > lon)) and            (lat < (lat_j - lat_i) * (lon - lon_i) / (lon_j - lon_i) + lat_i):
-            inside = not inside
-        j = i
-    return inside
-
-
-MONTMARTRE_POLYGON_CHECK = [
-    [48.89006616583566,  2.3399816318652427],
-    [48.88968475443497,  2.334657271277621],
-    [48.88672871742938,  2.3332070563311333],
-    [48.88456266233064,  2.3321090364430574],
-    [48.88265536633,     2.338386395424777],
-    [48.88243738501271,  2.3396915888756666],
-    [48.883908740467774, 2.346901228893387],
-    [48.88683769885438,  2.347357010733475],
-    [48.88930334012477,  2.346196838776649],
-    [48.89039308757785,  2.3420948022153993],
-    [48.88995719144694,  2.3385935689883013],
-    [48.8897119982031,   2.334553684495063],
-]
-
-
-def est_dans_zone(annonce):
-    """
-    Double vérification géographique :
-    1. Si le bien a des coordonnées GPS → ray-casting dans le polygone
-    2. Sinon → on vérifie que le code postal contient 75018
-    Si aucune info geo disponible → on accepte (bénéfice du doute)
-    """
-    lat = annonce.get("_lat")
-    lon = annonce.get("_lon")
-    if lat and lon:
-        try:
-            return point_in_polygon(float(lat), float(lon), MONTMARTRE_POLYGON_CHECK)
-        except Exception:
-            pass
-    adresse = str(annonce.get("adresse") or "").lower()
-    if adresse and "75018" not in adresse and "18e" not in adresse and "18ème" not in adresse:
-        if any(c.isdigit() for c in adresse):
-            return False
-    return True
-
-MELO_API_KEY = os.getenv("MELO_API_KEY", "")
-LBC_API_KEY  = os.getenv("LBC_API_KEY", "")
-MELO_BASE    = "https://api.notif.immo/documents/properties"
-
-MONTMARTRE_GEOSHAPE = [
-    ("2.3399816318652427", "48.89006616583566"),
-    ("2.334657271277621",  "48.88968475443497"),
-    ("2.3332070563311333", "48.88672871742938"),
-    ("2.3321090364430574", "48.88456266233064"),
-    ("2.338386395424777",  "48.88265536633"),
-    ("2.3396915888756666", "48.88243738501271"),
-    ("2.346901228893387",  "48.883908740467774"),
-    ("2.347357010733475",  "48.88683769885438"),
-    ("2.346196838776649",  "48.88930334012477"),
-    ("2.3420948022153993", "48.89039308757785"),
-    ("2.3385935689883013", "48.88995719144694"),
-    ("2.334553684495063",  "48.8897119982031"),
-    ("2.3399816318652427", "48.89006616583566"),
-]
-
-
-def get_prix_reference_dvf(code_postal="75018"):
-    print(f"  [DVF] Prix reference fixe : {PRIX_REF_M2} euro/m2")
-    return PRIX_REF_M2
 
 
 def build_geoshape_params(shape, page, items_per_page=30):
