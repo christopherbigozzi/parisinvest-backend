@@ -9,7 +9,7 @@ from telegram import envoyer_alerte
 
 def run():
     print(f"\n{'='*50}")
-    print(f"Cycle démarré : {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    print(f"Cycle demarre : {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     print(f"{'='*50}")
 
     prix_dvf = get_prix_reference_dvf("75018")
@@ -19,10 +19,9 @@ def run():
     annonces = scraper_toutes_sources(zone="montmartre", lbc_api_key=LBC_API_KEY)
 
     if not annonces:
-        print("Aucune annonce récupérée ce cycle.")
+        print("Aucune annonce recuperee ce cycle.")
         return
 
-    # Calcul du score pour chaque annonce avant sauvegarde
     for annonce in annonces:
         annonce["score"] = calculer_score(annonce, zone="montmartre")
 
@@ -35,9 +34,9 @@ def run():
         except Exception as e:
             print(f"  Erreur sauvegarde : {e}")
 
-    print(f"  {sauvegardes}/{len(annonces)} annonces sauvegardées")
+    print(f"  {sauvegardes}/{len(annonces)} annonces sauvegardees")
 
-    print("\nVérification alertes...")
+    print("\nVerification alertes...")
     top = get_top_annonces(zone="montmartre", limite=10)
     alertes = 0
     for a in top:
@@ -45,12 +44,12 @@ def run():
             envoyer_alerte(a)
             alertes += 1
 
-    print(f"\nCycle terminé — {sauvegardes} annonces, {alertes} alertes")
+    print(f"\nCycle termine — {sauvegardes} annonces, {alertes} alertes")
 
 run()
 
-schedule.every(5).minutes.do(run)
-print("\nScraper actif — tourne toutes les 5 minutes.")
+schedule.every(1).hours.do(run)
+print("\nScraper actif — tourne toutes les heures.")
 
 while True:
     schedule.run_pending()
