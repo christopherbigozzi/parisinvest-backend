@@ -4,13 +4,16 @@ from datetime import datetime
 from config import ZONES, LBC_API_KEY
 from scraper import scraper_toutes_sources, get_prix_reference_dvf
 from scoring import calculer_score
-from database import sauvegarder_annonce, get_top_annonces
+from database import sauvegarder_annonce, get_top_annonces, desactiver_annonces_expirees
 from telegram import envoyer_alerte
 
 def run():
     print(f"\n{'='*50}")
     print(f"Cycle demarre : {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     print(f"{'='*50}")
+
+    # Verifier et desactiver les annonces expirees (50 par cycle)
+    desactiver_annonces_expirees()
 
     prix_dvf = get_prix_reference_dvf("75018")
     if prix_dvf:
