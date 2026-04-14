@@ -264,7 +264,6 @@ def scraper_toutes_sources(zone="montmartre", lbc_api_key=""):
     print(f"\n--- Scraping toutes sources ({zone}) ---")
     toutes = []
     toutes += scraper_bienici(zone)
-    toutes += scraper_immodata(zone)
     toutes += scraper_leboncoin(lbc_api_key, zone)
     print(f"Total brut : {len(toutes)} annonces (avant déduplication)")
     return toutes
