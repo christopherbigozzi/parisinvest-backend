@@ -8,12 +8,6 @@ MELO_API_KEY = os.getenv("MELO_API_KEY", "")
 LBC_API_KEY  = os.getenv("LBC_API_KEY", "")
 MELO_BASE    = "https://api.notif.immo/documents/properties"
 
-# Polygone zone Montmartre (lon, lat) — sens horaire
-# Nord-ouest : Caulaincourt/Marcadet
-# Nord-est   : Clignancourt/Marcadet
-# Sud-est    : Clignancourt/Rochechouart (point ajouté)
-# Sud        : Clichy centre
-# Sud-ouest  : Caulaincourt/Clichy
 MONTMARTRE_GEOSHAPE = [
     ("2.3399816318652427", "48.89006616583566"),
     ("2.334657271277621",  "48.88968475443497"),
@@ -41,12 +35,12 @@ def build_geoshape_params(shape, page, items_per_page=30):
     for i, (lon, lat) in enumerate(shape):
         params[f"geoShapes[0][{i}][0]"] = lon
         params[f"geoShapes[0][{i}][1]"] = lat
-    params["propertyTypes[]"]  = "0"
-    params["transactionType"]  = "0"
-    params["expired"]          = "false"
-    params["order[createdAt]"] = "desc"
-    params["itemsPerPage"]     = str(items_per_page)
-    params["page"]             = str(page)
+    params["propertyTypes[]"]   = "0"
+    params["transactionType"]   = "0"
+    params["expired"]           = "false"
+    params["order[createdAt]"]  = "desc"
+    params["itemsPerPage"]      = str(items_per_page)
+    params["page"]              = str(page)
     params["withCoherentPrice"] = "true"
     return params
 
@@ -128,6 +122,17 @@ def _parser_melo(prop, zone):
             source = pub.get("name") or "Melo"
             url    = adverts[0].get("url") or ""
 
+        # Première photo disponible
+        photo = None
+        if adverts:
+            pics = adverts[0].get("pictures") or []
+            if pics:
+                photo = pics[0]
+        if not photo:
+            pics = prop.get("pictures") or []
+            if pics:
+                photo = pics[0]
+
         jours   = 0
         created = prop.get("createdAt") or ""
         if created:
@@ -143,18 +148,6 @@ def _parser_melo(prop, zone):
         marge_nette, marge_pct = calculer_marge(surface, prix)
 
         titre = prop.get("title") or f"Appartement {surface}m2"
-
-        # Premiere photo disponible
-        photo = None
-        if adverts:
-            pics = adverts[0].get("pictures") or []
-            if pics:
-                photo = pics[0]
-        if not photo:
-            pics = prop.get("pictures") or []
-            if pics:
-                photo = pics[0]
-
 
         return {
             "titre":          titre[:120],
