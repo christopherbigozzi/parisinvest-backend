@@ -34,12 +34,12 @@ def build_geoshape_params(shape, page, items_per_page=30):
     for i, (lon, lat) in enumerate(shape):
         params[f"geoShapes[0][{i}][0]"] = lon
         params[f"geoShapes[0][{i}][1]"] = lat
-    params["propertyTypes[]"]   = "0"
-    params["transactionType"]   = "0"
-    params["expired"]           = "false"
-    params["order[createdAt]"]  = "desc"
-    params["itemsPerPage"]      = str(items_per_page)
-    params["page"]              = str(page)
+    params["propertyTypes[]"]  = "0"
+    params["transactionType"]  = "0"
+    params["expired"]          = "false"
+    params["order[createdAt]"] = "desc"
+    params["itemsPerPage"]     = str(items_per_page)
+    params["page"]             = str(page)
     params["withCoherentPrice"] = "true"
     return params
 
@@ -137,6 +137,18 @@ def _parser_melo(prop, zone):
 
         titre = prop.get("title") or f"Appartement {surface}m2"
 
+        # Premiere photo disponible
+        photo = None
+        if adverts:
+            pics = adverts[0].get("pictures") or []
+            if pics:
+                photo = pics[0]
+        if not photo:
+            pics = prop.get("pictures") or []
+            if pics:
+                photo = pics[0]
+
+
         return {
             "titre":          titre[:120],
             "adresse":        adresse,
@@ -146,6 +158,7 @@ def _parser_melo(prop, zone):
             "dpe":            dpe.upper()[:1],
             "source":         source,
             "url":            url,
+            "photo":          photo,
             "date_publi":     created or datetime.now(timezone.utc).isoformat(),
             "jours_en_ligne": jours,
             "nb_baisses":     nb_baisses,
