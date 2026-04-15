@@ -8,6 +8,8 @@ supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
 MELO_API_KEY = os.getenv("MELO_API_KEY", "")
 MELO_BASE    = "https://api.notif.immo/documents/properties"
 
+MAX_JOURS    = 100  # Desactiver automatiquement au-dela de 100 jours
+
 
 def generer_id(adresse, surface, prix):
     prix_arrondi = round(prix / 5000) * 5000
@@ -17,28 +19,37 @@ def generer_id(adresse, surface, prix):
 
 def desactiver_annonces_expirees():
     """
-    Désactive les annonces qui ne sont plus valides via 3 signaux :
-    1. Melo marque le bien comme expired=true
-    2. Ancienneté > 90 jours sans baisse de prix (bien sorti du marché)
-    3. URL retourne 404/410
-
-    On vérifie 30 annonces par cycle, les plus anciennes en premier.
+    Triple vérification — 60 annonces par cycle, les plus anciennes en priorité :
+    1. Ancienneté > 100 jours → désactivation immédiate sans vérification
+    2. Melo expired=true → désactivation
+    3. URL retourne 404/410 → désactivation
     """
     print("  [Check] Vérification annonces expirées...")
-
     try:
-        result = supabase.table("annonces")\
-            .select("id, url, titre, melo_id, jours_en_ligne, nb_baisses")\
+        # ── Etape 1 : désactiver toutes les annonces > 100 jours immédiatement ──
+        result_old = supabase.table("annonces")\
+            .update({"actif": False})\
             .eq("actif", True)\
-            .order("date_maj", desc=False)\
-            .limit(30)\
+            .lt("jours_en_ligne", 9999)\
+            .gt("jours_en_ligne", MAX_JOURS)\
+            .execute()
+        nb_old = len(result_old.data) if result_old.data else 0
+        if nb_old > 0:
+            print(f"  [Check] {nb_old} annonces > {MAX_JOURS}j désactivées automatiquement")
+
+        # ── Etape 2 : vérifier les 60 annonces actives les plus anciennes ────────
+        result = supabase.table("annonces")\
+            .select("id, url, titre, melo_id, jours_en_ligne")\
+            .eq("actif", True)\
+            .order("jours_en_ligne", desc=True)\
+            .limit(60)\
             .execute()
 
-        annonces   = result.data or []
+        annonces    = result.data or []
         desactivees = 0
 
         for a in annonces:
-            raison = _est_expirée(a)
+            raison = _est_expiree(a)
             if raison:
                 supabase.table("annonces")\
                     .update({"actif": False})\
@@ -53,11 +64,11 @@ def desactiver_annonces_expirees():
         print(f"  [Check] Erreur : {e}")
 
 
-def _est_expirée(a):
+def _est_expiree(a):
     """
-    Retourne la raison d'expiration ou None si l'annonce est encore valide.
+    Retourne la raison d'expiration ou None si encore valide.
     """
-    # ── Signal 1 : Melo a marqué le bien comme expired ───────────────────────
+    # Signal 1 : Melo a marqué le bien comme expired=true
     melo_id = a.get("melo_id") or ""
     if MELO_API_KEY and melo_id:
         try:
@@ -65,7 +76,7 @@ def _est_expirée(a):
                 MELO_BASE,
                 params={"ids[]": melo_id, "expired": "true"},
                 headers={"X-API-KEY": MELO_API_KEY},
-                timeout=10
+                timeout=8
             )
             if resp.status_code == 200:
                 total = resp.json().get("hydra:totalItems", -1)
@@ -74,18 +85,12 @@ def _est_expirée(a):
         except Exception:
             pass
 
-    # ── Signal 2 : ancienneté > 90 jours sans aucune baisse de prix ──────────
-    jours   = a.get("jours_en_ligne") or 0
-    baisses = a.get("nb_baisses") or 0
-    if jours > 90 and baisses == 0:
-        return f"Ancienneté {jours}j sans baisse"
-
-    # ── Signal 3 : URL retourne 404 ou 410 ───────────────────────────────────
+    # Signal 2 : URL retourne 404 ou 410
     url = a.get("url") or ""
     if url:
         try:
             resp = requests.head(
-                url, timeout=6, allow_redirects=True,
+                url, timeout=5, allow_redirects=True,
                 headers={"User-Agent": "Mozilla/5.0"}
             )
             if resp.status_code in (404, 410):
@@ -98,6 +103,10 @@ def _est_expirée(a):
 
 def sauvegarder_annonce(annonce):
     """Sauvegarde une annonce, met à jour si elle existe déjà."""
+    # Rejeter les annonces trop vieilles avant même de les sauvegarder
+    if (annonce.get("jours_en_ligne") or 0) > MAX_JOURS:
+        return
+
     annonce_id = generer_id(
         annonce.get("adresse", ""),
         annonce.get("surface", 0),
@@ -112,20 +121,21 @@ def sauvegarder_annonce(annonce):
         if annonce["prix"] < ancien_prix:
             supabase.table("historique_prix").insert({
                 "annonce_id": annonce_id,
-                "prix": ancien_prix
+                "prix":       ancien_prix
             }).execute()
             print(f"  Baisse détectée : {ancien_prix} → {annonce['prix']} €")
 
         supabase.table("annonces").update({
-            "prix":       annonce["prix"],
-            "prix_m2":    annonce["prix_m2"],
-            "score":      annonce["score"],
-            "marge_nette": annonce["marge_nette"],
-            "marge_pct":  annonce["marge_pct"],
-            "photo":      annonce.get("photo"),
-            "melo_id":    annonce.get("melo_id"),
-            "actif":      True,
-            "date_maj":   "now()"
+            "prix":           annonce["prix"],
+            "prix_m2":        annonce["prix_m2"],
+            "score":          annonce["score"],
+            "marge_nette":    annonce["marge_nette"],
+            "marge_pct":      annonce["marge_pct"],
+            "photo":          annonce.get("photo"),
+            "melo_id":        annonce.get("melo_id"),
+            "jours_en_ligne": annonce.get("jours_en_ligne"),
+            "actif":          True,
+            "date_maj":       "now()"
         }).eq("id", annonce_id).execute()
     else:
         supabase.table("annonces").insert(annonce).execute()
@@ -137,6 +147,7 @@ def get_top_annonces(zone="montmartre", limite=5):
         .select("*")\
         .eq("zone", zone)\
         .eq("actif", True)\
+        .lte("jours_en_ligne", MAX_JOURS)\
         .order("score", desc=True)\
         .limit(limite)\
         .execute()
