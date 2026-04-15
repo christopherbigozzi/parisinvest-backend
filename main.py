@@ -4,6 +4,7 @@ from datetime import datetime
 from config import ZONES, LBC_API_KEY
 from scraper import scraper_toutes_sources
 from scoring import calculer_score
+from ml_scorer import get_preference_vectors, calculer_score_ml
 from database import sauvegarder_annonce, get_top_annonces, desactiver_annonces_expirees
 from telegram import envoyer_alerte
 
@@ -15,12 +16,16 @@ def run():
     print(f"Cycle demarre : {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     print(f"{'='*50}")
 
-    # Prix de reference fixe 18e arrondissement
     ZONES["montmartre"]["prix_m2_ref"] = PRIX_REF_M2
     print(f"  [DVF] Prix reference fixe : {PRIX_REF_M2} euro/m2")
 
-    # Verifier et desactiver les annonces expirees (30 par cycle)
+    # Verifier et desactiver les annonces expirees
     desactiver_annonces_expirees()
+
+    # Charger les preferences ML une seule fois pour tout le cycle
+    print("  [ML] Chargement preferences utilisateur...")
+    vec_likes, vec_dislikes, nb_likes, nb_dislikes = get_preference_vectors()
+    print(f"  [ML] {nb_likes} likes / {nb_dislikes} dislikes")
 
     # Scraper toutes les sources
     annonces = scraper_toutes_sources(zone="montmartre", lbc_api_key=LBC_API_KEY)
@@ -29,9 +34,16 @@ def run():
         print("Aucune annonce recuperee ce cycle.")
         return
 
-    # Calculer le score pour chaque annonce
+    # Calculer score = score regles + score ML
     for annonce in annonces:
-        annonce["score"] = calculer_score(annonce, zone="montmartre")
+        score_ml = calculer_score_ml(
+            annonce,
+            vec_likes=vec_likes,
+            vec_dislikes=vec_dislikes,
+            nb_likes=nb_likes,
+            nb_dislikes=nb_dislikes,
+        )
+        annonce["score"] = calculer_score(annonce, zone="montmartre", score_ml=score_ml)
 
     # Sauvegarder en base
     print(f"\nSauvegarde de {len(annonces)} annonces...")
@@ -59,8 +71,8 @@ def run():
 
 run()
 
-schedule.every(1).hours.do(run)
-print("\nScraper actif — tourne toutes les heures.")
+schedule.every(10).minutes.do(run)
+print("\nScraper actif — tourne toutes les 10 minutes.")
 
 while True:
     schedule.run_pending()
