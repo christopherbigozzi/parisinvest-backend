@@ -4,7 +4,25 @@ from datetime import datetime, timezone
 from scoring import calculer_marge
 from zone_filter import est_dans_zone
 
-PRIX_REF_M2  = 9800
+MELO_API_KEY = os.getenv("MELO_API_KEY", "")
+LBC_API_KEY  = os.getenv("LBC_API_KEY", "")
+MELO_BASE    = "https://api.notif.immo/documents/properties"
+
+MONTMARTRE_GEOSHAPE = [
+    ("2.3399816318652427", "48.89006616583566"),
+    ("2.334657271277621",  "48.88968475443497"),
+    ("2.3332070563311333", "48.88672871742938"),
+    ("2.3321090364430574", "48.88456266233064"),
+    ("2.338386395424777",  "48.88265536633"),
+    ("2.3396915888756666", "48.88243738501271"),
+    ("2.346901228893387",  "48.883908740467774"),
+    ("2.347357010733475",  "48.88683769885438"),
+    ("2.346196838776649",  "48.88930334012477"),
+    ("2.3420948022153993", "48.89039308757785"),
+    ("2.3385935689883013", "48.88995719144694"),
+    ("2.334553684495063",  "48.8897119982031"),
+    ("2.3399816318652427", "48.89006616583566"),
+]
 
 
 def build_geoshape_params(shape, page, items_per_page=30):
@@ -49,23 +67,23 @@ def scraper_melo(zone="montmartre"):
                 print(f"  [Melo] Erreur : {resp.text[:200]}")
                 break
 
-            data  = resp.json()
-            items = data.get("hydra:member", [])
-            total = data.get("hydra:totalItems", 0)
+            data        = resp.json()
+            items       = data.get("hydra:member", [])
+            total       = data.get("hydra:totalItems", 0)
             total_pages = max(1, (total + 29) // 30)
 
             print(f"  [Melo] {len(items)} biens page {page}/{total_pages} (total: {total})")
 
             for prop in items:
                 a = _parser_melo(prop, zone)
-                if a:
-                    if not est_dans_zone(a):
-                        print(f"  [Melo] Hors zone filtre : {a.get('titre','')[:40]} ({a.get('adresse','')})")
-                        continue
-                    # Nettoyer les champs internes avant sauvegarde
-                    a.pop("_lat", None)
-                    a.pop("_lon", None)
-                    annonces.append(a)
+                if not a:
+                    continue
+                if not est_dans_zone(a):
+                    print(f"  [Melo] Hors zone : {a.get('titre', '')[:40]}")
+                    continue
+                a.pop("_lat", None)
+                a.pop("_lon", None)
+                annonces.append(a)
 
             page += 1
 
@@ -105,7 +123,6 @@ def _parser_melo(prop, zone):
             source = pub.get("name") or "Melo"
             url    = adverts[0].get("url") or ""
 
-        # Première photo disponible
         photo = None
         if adverts:
             pics = adverts[0].get("pictures") or []
@@ -132,7 +149,6 @@ def _parser_melo(prop, zone):
         gps_lon   = locations.get("lon")
 
         marge_nette, marge_pct = calculer_marge(surface, prix)
-
         titre = prop.get("title") or f"Appartement {surface}m2"
 
         return {
