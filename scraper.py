@@ -125,7 +125,10 @@ def _parser_melo(prop, zone):
 
         photo = None
         if adverts:
-            pics = adverts[0].get("pictures") or []
+            # picturesRemote = URLs sources (SeLoger, Century21...) — pas de CORS
+            pics = adverts[0].get("picturesRemote") or []
+            if not pics:
+                pics = adverts[0].get("pictures") or []
             if pics:
                 photo = pics[0]
         if not photo:
