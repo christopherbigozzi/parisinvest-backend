@@ -7,6 +7,7 @@ from scoring import calculer_score
 from ml_scorer import get_preference_vectors, calculer_score_ml
 from database import sauvegarder_annonce, get_top_annonces, desactiver_annonces_expirees
 from telegram import envoyer_alerte
+from image_proxy import start_proxy_thread
 
 PRIX_REF_M2 = 9800
 
@@ -19,22 +20,18 @@ def run():
     ZONES["montmartre"]["prix_m2_ref"] = PRIX_REF_M2
     print(f"  [DVF] Prix reference fixe : {PRIX_REF_M2} euro/m2")
 
-    # Verifier et desactiver les annonces expirees
     desactiver_annonces_expirees()
 
-    # Charger les preferences ML une seule fois pour tout le cycle
     print("  [ML] Chargement preferences utilisateur...")
     vec_likes, vec_dislikes, nb_likes, nb_dislikes = get_preference_vectors()
     print(f"  [ML] {nb_likes} likes / {nb_dislikes} dislikes")
 
-    # Scraper toutes les sources
     annonces = scraper_toutes_sources(zone="montmartre", lbc_api_key=LBC_API_KEY)
 
     if not annonces:
         print("Aucune annonce recuperee ce cycle.")
         return
 
-    # Calculer score = score regles + score ML
     for annonce in annonces:
         score_ml = calculer_score_ml(
             annonce,
@@ -45,7 +42,6 @@ def run():
         )
         annonce["score"] = calculer_score(annonce, zone="montmartre", score_ml=score_ml)
 
-    # Sauvegarder en base
     print(f"\nSauvegarde de {len(annonces)} annonces...")
     sauvegardes = 0
     for annonce in annonces:
@@ -57,7 +53,6 @@ def run():
 
     print(f"  {sauvegardes}/{len(annonces)} annonces sauvegardees")
 
-    # Alertes Telegram pour les meilleures opportunites
     print("\nVerification alertes...")
     top     = get_top_annonces(zone="montmartre", limite=10)
     alertes = 0
@@ -68,6 +63,9 @@ def run():
 
     print(f"\nCycle termine — {sauvegardes} annonces, {alertes} alertes")
 
+
+# Démarrer le proxy d'images en arrière-plan
+start_proxy_thread()
 
 run()
 
