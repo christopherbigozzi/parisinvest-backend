@@ -17,15 +17,16 @@ def calculer_marge(surface, prix_achat):
     return round(marge_nette), round(marge_pct, 1)
 
 
-def calculer_score(annonce, zone="montmartre"):
+def calculer_score(annonce, zone="montmartre", score_ml=0):
     """
-    Score sur 120 pts ramene a 100 :
-      1. Fraicheur annonce           : 25 pts  (forte ponderation nouvelles)
-      2. Marge nette                 : 30 pts
-      3. Decote vs prix DVF          : 20 pts
-      4. Prix/m2 vs moyenne          : 15 pts
-      5. Potentiel travaux (DPE)     : 10 pts
-    Bonus baisses de prix            : +5 pts max (hors total)
+    Score sur 100 pts :
+      1. Fraicheur annonce       : 20 pts
+      2. Marge nette             : 25 pts
+      3. Decote vs prix DVF      : 15 pts
+      4. Prix/m2 vs moyenne      : 15 pts
+      5. Potentiel travaux (DPE) : 5 pts
+      6. Score ML (preferences)  : 25 pts (0 si < 3 feedbacks)
+    Bonus baisses de prix        : +5 pts max
     """
     score    = 0
     prix_ref = ZONES.get(zone, {}).get("prix_m2_ref", 9800)
@@ -35,52 +36,49 @@ def calculer_score(annonce, zone="montmartre"):
     baisses  = annonce.get("nb_baisses", 0) or 0
     dpe      = str(annonce.get("dpe", "") or "").upper().strip()
 
-    # ── 1. Fraicheur (25 pts) ─────────────────────────────────────────────────
-    # Forte prime aux nouvelles annonces — tu dois etre le premier
+    # ── 1. Fraicheur (20 pts) ─────────────────────────────────────────────────
     if jours == 0:
-        score += 25    # publiee aujourd hui
+        score += 20
     elif jours <= 1:
-        score += 23    # hier
+        score += 18
     elif jours <= 3:
-        score += 18    # moins de 3 jours
+        score += 14
     elif jours <= 7:
-        score += 12    # moins d une semaine
-    elif jours <= 14:
-        score += 7     # moins de 2 semaines
-    elif jours <= 30:
-        score += 3     # moins d un mois
-    else:
-        score += 0     # vieille annonce — pas de bonus fraicheur
-
-    # ── 2. Marge nette (30 pts) ───────────────────────────────────────────────
-    if marge_pct >= 30:
-        score += 30
-    elif marge_pct >= 25:
-        score += 26
-    elif marge_pct >= 20:
-        score += 21
-    elif marge_pct >= 15:
-        score += 15
-    elif marge_pct >= 10:
         score += 9
+    elif jours <= 14:
+        score += 5
+    elif jours <= 30:
+        score += 2
+
+    # ── 2. Marge nette (25 pts) ───────────────────────────────────────────────
+    if marge_pct >= 30:
+        score += 25
+    elif marge_pct >= 25:
+        score += 21
+    elif marge_pct >= 20:
+        score += 17
+    elif marge_pct >= 15:
+        score += 12
+    elif marge_pct >= 10:
+        score += 7
     elif marge_pct >= 5:
-        score += 4
+        score += 3
     elif marge_pct > 0:
         score += 1
 
-    # ── 3. Decote vs marche (20 pts) ─────────────────────────────────────────
+    # ── 3. Decote vs marche (15 pts) ─────────────────────────────────────────
     if prix_ref > 0 and prix_m2 > 0:
         decote = (prix_ref - prix_m2) / prix_ref
         if decote >= 0.20:
-            score += 20
+            score += 15
         elif decote >= 0.15:
-            score += 16
+            score += 12
         elif decote >= 0.10:
-            score += 11
+            score += 8
         elif decote >= 0.05:
-            score += 6
+            score += 4
         elif decote >= 0:
-            score += 2
+            score += 1
 
     # ── 4. Prix/m2 vs moyenne (15 pts) ───────────────────────────────────────
     if prix_m2 > 0 and prix_ref > 0:
@@ -93,12 +91,14 @@ def calculer_score(annonce, zone="montmartre"):
         elif prix_m2 < prix_ref:
             score += 2
 
-    # ── 5. Potentiel travaux DPE (10 pts) ────────────────────────────────────
-    dpe_points = {"G": 10, "F": 9, "E": 6, "D": 3, "C": 1, "B": 0, "A": 0}
-    score += dpe_points.get(dpe, 4)
+    # ── 5. Potentiel travaux DPE (5 pts) ─────────────────────────────────────
+    dpe_points = {"G": 5, "F": 4, "E": 3, "D": 2, "C": 1, "B": 0, "A": 0}
+    score += dpe_points.get(dpe, 2)
 
-    # ── Bonus baisses de prix (+5 pts max) ───────────────────────────────────
-    # Signal fort de vendeur motive
+    # ── 6. Score ML preferences (25 pts) ─────────────────────────────────────
+    score += min(int(score_ml or 0), 25)
+
+    # ── Bonus baisses (+5 pts max) ────────────────────────────────────────────
     if baisses >= 3:
         score += 5
     elif baisses == 2:
