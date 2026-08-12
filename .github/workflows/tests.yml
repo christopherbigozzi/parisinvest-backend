@@ -1,0 +1,32 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, sourcing-mail]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # Les trois suites ne touchent ni au réseau ni à la base : seules
+      # les bibliothèques de parsing sont nécessaires.
+      - name: Installer les dépendances de test
+        run: pip install beautifulsoup4 lxml
+
+      - name: Fonctions pures
+        run: python tests_unitaires.py
+
+      - name: Parsing des alertes réelles
+        run: python tests_parsers.py
+
+      - name: Cycle complet
+        run: python tests_integration.py
