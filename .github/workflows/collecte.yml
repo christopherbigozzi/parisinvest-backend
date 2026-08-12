@@ -1,0 +1,48 @@
+name: Collecte ParisInvest
+
+on:
+  schedule:
+    # Toutes les 30 minutes. GitHub déclenche souvent avec plusieurs minutes
+    # de retard aux heures chargées ; sans importance ici, la boîte Gmail
+    # conserve les alertes jusqu'au passage suivant.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:      # bouton « Run workflow » pour déclencher à la main
+
+# Deux cycles simultanés écriraient les mêmes lignes en base : on annule
+# le déclenchement en cours plutôt que de les laisser se marcher dessus.
+concurrency:
+  group: collecte
+  cancel-in-progress: false
+
+jobs:
+  collecte:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      - name: Lancer un cycle
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GMAIL_CLIENT_ID:      ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET:  ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN:  ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          GMAIL_LABEL:          parisinvest
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Les runners GitHub partagent des plages d'IP que SeLoger et
+          # Leboncoin bloquent volontiers. On enrichit moins d'annonces par
+          # passage pour rester discret ; l'échec reste sans conséquence,
+          # une annonce non enrichie garde une note neutre sur les travaux.
+          ENRICH_MAX:           "10"
+        run: python main.py --once
