@@ -137,9 +137,18 @@ def est_dans_zone(annonce):
         # Rue trouvée mais pas dans la zone
         return False
 
-    # 3. Fallback code postal
+    # 3. Code postal
     if "75018" in adresse or "18e" in adresse.lower() or "18ème" in adresse.lower():
         return True
 
-    # Aucune info fiable → on accepte par bénéfice du doute
+    # 4. Un autre code postal parisien est un rejet net. Sans cette règle, le
+    #    bénéfice du doute laissait passer tout Paris : les alertes mail ne
+    #    donnent pas de GPS, et le nom de rue manque souvent, donc l'étape 2
+    #    ne tranche presque jamais.
+    autre_cp = re.search(r"\b75(0\d|1[0-9]|20)\b", adresse)
+    if autre_cp and autre_cp.group(0) != "75018":
+        return False
+
+    # Aucune information exploitable : on accepte, le périmètre étant déjà
+    # filtré à la source par l'alerte du portail.
     return True

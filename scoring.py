@@ -1,109 +1,168 @@
-from config import (TRAVAUX_PAR_M2, FRAIS_NOTAIRE, ZONES)
+"""
+scoring.py — modèle de marge et score d'opportunité.
 
-PRIX_REVENTE_M2_HAUT = 13500
+Marge AVANT FISCALITÉ. Le régime d'imposition se traite au cas par cas sur
+les annonces retenues, il n'entre pas dans le classement.
+
+Répartition du score, sur 100 :
+    fraîcheur de l'annonce ....... 20
+    marge nette .................. 25
+    décote vs prix de marché ..... 25
+    potentiel travaux ............  5
+    préférences apprises (ML) .... 25
+    bonus baisses de prix ........ +5, plafonné à 100
+
+Note : les deux composantes « décote vs DVF » et « prix/m² vs moyenne » de la
+version précédente mesuraient la même chose et pesaient 30 points à elles deux.
+Elles sont fusionnées ici en une seule composante de 25 points.
+"""
+import re
+
+from config import (
+    TRAVAUX_PAR_M2,
+    FRAIS_NOTAIRE,
+    DUREE_PORTAGE_MOIS,
+    TAUX_FINANCEMENT,
+    CHARGES_PORTAGE_M2,
+    FRAIS_AGENCE_REVENTE,
+    ZONES,
+)
+
+# Mots-clés signalant un bien à retravailler : c'est là que se fait la marge.
+MOTS_TRAVAUX = re.compile(
+    r"\b(à rénover|a renover|à rafraîchir|a rafraichir|à moderniser|a moderniser|"
+    r"travaux|plateau|à restaurer|a restaurer|dans son jus|jus d'époque|"
+    r"potentiel|à réhabiliter|a rehabiliter|gros œuvre|gros oeuvre|"
+    r"succession|viager libre|au plus offrant)\b",
+    re.I,
+)
+
+# Mots-clés signalant au contraire un bien déjà valorisé : peu de marge à prendre.
+MOTS_REFAIT = re.compile(
+    r"\b(refait à neuf|refait a neuf|entièrement rénové|entierement renove|"
+    r"rénové avec goût|renove avec gout|prestations haut de gamme|"
+    r"standing|neuf|livré|livre neuf)\b",
+    re.I,
+)
 
 
-def calculer_marge(surface, prix_achat):
+def parametres_zone(zone="montmartre"):
+    z = ZONES.get(zone) or ZONES["montmartre"]
+    return z["prix_m2_ref"], z["prix_revente_m2"]
+
+
+def calculer_marge(surface, prix_achat, zone="montmartre", travaux_m2=None,
+                   prix_revente_m2=None):
     """
-    Marge nette :
-      Prix revente (13 500 euro/m2) - Achat - Travaux - Notaire (8%)
+    Détail du calcul, tous postes explicites pour être affichable tel quel
+    dans le dashboard.
     """
-    travaux      = surface * TRAVAUX_PAR_M2
+    surface    = float(surface or 0)
+    prix_achat = float(prix_achat or 0)
+    if surface <= 0 or prix_achat <= 0:
+        return _marge_vide()
+
+    ref_m2, revente_m2_defaut = parametres_zone(zone)
+    travaux_m2      = TRAVAUX_PAR_M2 if travaux_m2 is None else float(travaux_m2)
+    prix_revente_m2 = revente_m2_defaut if prix_revente_m2 is None else float(prix_revente_m2)
+
+    travaux      = surface * travaux_m2
     notaire      = prix_achat * FRAIS_NOTAIRE
-    prix_revente = surface * PRIX_REVENTE_M2_HAUT
-    cout_total   = prix_achat + travaux + notaire
-    marge_nette  = prix_revente - cout_total
-    marge_pct    = (marge_nette / cout_total) * 100 if cout_total > 0 else 0
-    return round(marge_nette), round(marge_pct, 1)
+    duree_annees = DUREE_PORTAGE_MOIS / 12.0
+
+    portage_financier = (prix_achat + travaux) * TAUX_FINANCEMENT * duree_annees
+    portage_charges   = surface * CHARGES_PORTAGE_M2 * duree_annees
+    portage           = portage_financier + portage_charges
+
+    prix_revente  = surface * prix_revente_m2
+    frais_revente = prix_revente * FRAIS_AGENCE_REVENTE
+
+    cout_total  = prix_achat + travaux + notaire + portage + frais_revente
+    marge_nette = prix_revente - cout_total
+    marge_pct   = (marge_nette / cout_total * 100) if cout_total > 0 else 0.0
+
+    return {
+        "travaux":       round(travaux),
+        "notaire":       round(notaire),
+        "portage":       round(portage),
+        "frais_revente": round(frais_revente),
+        "prix_revente":  round(prix_revente),
+        "cout_total":    round(cout_total),
+        "marge_nette":   round(marge_nette),
+        "marge_pct":     round(marge_pct, 1),
+        "prix_m2":       round(prix_achat / surface),
+        "prix_m2_ref":   round(ref_m2),
+    }
+
+
+def _marge_vide():
+    return {
+        "travaux": 0, "notaire": 0, "portage": 0, "frais_revente": 0,
+        "prix_revente": 0, "cout_total": 0, "marge_nette": 0, "marge_pct": 0.0,
+        "prix_m2": 0, "prix_m2_ref": 0,
+    }
+
+
+def _points_fraicheur(jours):
+    for seuil, pts in ((0, 20), (1, 18), (3, 14), (7, 9), (14, 5), (30, 2)):
+        if jours <= seuil:
+            return pts
+    return 0
+
+
+def _points_marge(marge_pct):
+    for seuil, pts in ((30, 25), (25, 21), (20, 17), (15, 12), (10, 7), (5, 3)):
+        if marge_pct >= seuil:
+            return pts
+    return 1 if marge_pct > 0 else 0
+
+
+def _points_decote(prix_m2, prix_ref):
+    if not (prix_m2 > 0 and prix_ref > 0):
+        return 0
+    decote = (prix_ref - prix_m2) / prix_ref
+    for seuil, pts in ((0.25, 25), (0.20, 21), (0.15, 17), (0.10, 12), (0.05, 6)):
+        if decote >= seuil:
+            return pts
+    return 2 if decote >= 0 else 0
+
+
+def _points_travaux(dpe, texte):
+    """
+    5 points au maximum. Le DPE reste le signal principal quand il est
+    disponible ; à défaut, on lit le vocabulaire de l'annonce.
+    """
+    dpe = str(dpe or "").upper().strip()[:1]
+    pts_dpe = {"G": 5, "F": 4, "E": 3, "D": 2, "C": 1}.get(dpe)
+    if pts_dpe is not None:
+        return pts_dpe
+    if dpe in ("A", "B"):
+        return 0
+
+    texte = texte or ""
+    if MOTS_REFAIT.search(texte):
+        return 0
+    if MOTS_TRAVAUX.search(texte):
+        return 5
+    return 2  # information absente : note neutre, ni prime ni pénalité
+
+
+def _points_baisses(nb):
+    return {0: 0, 1: 1, 2: 3}.get(nb, 5)
 
 
 def calculer_score(annonce, zone="montmartre", score_ml=0):
-    """
-    Score sur 100 pts :
-      1. Fraicheur annonce       : 20 pts
-      2. Marge nette             : 25 pts
-      3. Decote vs prix DVF      : 15 pts
-      4. Prix/m2 vs moyenne      : 15 pts
-      5. Potentiel travaux (DPE) : 5 pts
-      6. Score ML (preferences)  : 25 pts (0 si < 3 feedbacks)
-    Bonus baisses de prix        : +5 pts max
-    """
-    score    = 0
-    prix_ref = ZONES.get(zone, {}).get("prix_m2_ref", 9800)
-    prix_m2  = annonce.get("prix_m2", 0) or 0
-    marge_pct = annonce.get("marge_pct", 0) or 0
-    jours    = annonce.get("jours_en_ligne", 0) or 0
-    baisses  = annonce.get("nb_baisses", 0) or 0
-    dpe      = str(annonce.get("dpe", "") or "").upper().strip()
+    texte = " ".join(str(annonce.get(c) or "") for c in ("titre", "description"))
 
-    # ── 1. Fraicheur (20 pts) ─────────────────────────────────────────────────
-    if jours == 0:
-        score += 20
-    elif jours <= 1:
-        score += 18
-    elif jours <= 3:
-        score += 14
-    elif jours <= 7:
-        score += 9
-    elif jours <= 14:
-        score += 5
-    elif jours <= 30:
-        score += 2
-
-    # ── 2. Marge nette (25 pts) ───────────────────────────────────────────────
-    if marge_pct >= 30:
-        score += 25
-    elif marge_pct >= 25:
-        score += 21
-    elif marge_pct >= 20:
-        score += 17
-    elif marge_pct >= 15:
-        score += 12
-    elif marge_pct >= 10:
-        score += 7
-    elif marge_pct >= 5:
-        score += 3
-    elif marge_pct > 0:
-        score += 1
-
-    # ── 3. Decote vs marche (15 pts) ─────────────────────────────────────────
-    if prix_ref > 0 and prix_m2 > 0:
-        decote = (prix_ref - prix_m2) / prix_ref
-        if decote >= 0.20:
-            score += 15
-        elif decote >= 0.15:
-            score += 12
-        elif decote >= 0.10:
-            score += 8
-        elif decote >= 0.05:
-            score += 4
-        elif decote >= 0:
-            score += 1
-
-    # ── 4. Prix/m2 vs moyenne (15 pts) ───────────────────────────────────────
-    if prix_m2 > 0 and prix_ref > 0:
-        if prix_m2 < prix_ref * 0.80:
-            score += 15
-        elif prix_m2 < prix_ref * 0.88:
-            score += 10
-        elif prix_m2 < prix_ref * 0.95:
-            score += 5
-        elif prix_m2 < prix_ref:
-            score += 2
-
-    # ── 5. Potentiel travaux DPE (5 pts) ─────────────────────────────────────
-    dpe_points = {"G": 5, "F": 4, "E": 3, "D": 2, "C": 1, "B": 0, "A": 0}
-    score += dpe_points.get(dpe, 2)
-
-    # ── 6. Score ML preferences (25 pts) ─────────────────────────────────────
-    score += min(int(score_ml or 0), 25)
-
-    # ── Bonus baisses (+5 pts max) ────────────────────────────────────────────
-    if baisses >= 3:
-        score += 5
-    elif baisses == 2:
-        score += 3
-    elif baisses == 1:
-        score += 1
-
-    return min(score, 100)
+    score = (
+        _points_fraicheur(int(annonce.get("jours_en_ligne") or 0))
+        + _points_marge(float(annonce.get("marge_pct") or 0))
+        + _points_decote(
+            float(annonce.get("prix_m2") or 0),
+            float(annonce.get("prix_m2_ref") or parametres_zone(zone)[0]),
+        )
+        + _points_travaux(annonce.get("dpe"), texte)
+        + min(int(score_ml or 0), 25)
+        + _points_baisses(int(annonce.get("nb_baisses") or 0))
+    )
+    return max(0, min(score, 100))
