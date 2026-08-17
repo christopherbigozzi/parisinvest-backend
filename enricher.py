@@ -30,6 +30,65 @@ TIMEOUT            = 12
 # annonce Bien'ici, pourtant dotée d'une URL exploitable, n'a eu sa chance.
 DOMAINES_SANS_PAGE = ("click.by.seloger.com",)
 
+# ── Bien'ici : passer par sa ressource JSON ──────────────────────────────────
+# La page d'annonce Bien'ici est une application JavaScript : servie telle
+# quelle, elle ne contient qu'un « Il est nécessaire d'activer Javascript ».
+# Le scraping HTML y est donc sans objet — ce n'est pas un blocage, il n'y a
+# rien à lire. Son propre front s'alimente à cette ressource, qui rend le DPE,
+# l'étage et la description sans exécuter le moindre script.
+RE_BIENICI_ID = re.compile(r"bienici\.com/annonce/([\w\-]+)", re.I)
+BIENICI_JSON = "https://www.bienici.com/realEstateAd.json?id={}"
+
+
+def _etage_depuis_json(valeur):
+    """0 → « RDC », 4 → « 4e ». Chaîne vide si l'information manque."""
+    if valeur is None or valeur == "":
+        return ""
+    try:
+        niveau = int(valeur)
+    except (TypeError, ValueError):
+        return ""
+    return "RDC" if niveau == 0 else f"{niveau}e"
+
+
+def appliquer_donnees_bienici(annonce, donnees):
+    """
+    Reporte sur l'annonce les champs utiles du JSON Bien'ici.
+
+    Ne remplace jamais une valeur déjà connue : le mail fait foi sur le prix et
+    la surface, qui servent à l'identité et à la marge. On ne complète que ce
+    qui manquait.
+    """
+    if not isinstance(donnees, dict):
+        return False
+
+    rempli = False
+
+    dpe = str(donnees.get("energyClassification") or "").strip().upper()[:1]
+    if dpe and dpe in "ABCDEFG" and not annonce.get("dpe"):
+        annonce["dpe"] = dpe
+        rempli = True
+
+    etage = _etage_depuis_json(donnees.get("floor"))
+    if etage and not annonce.get("etage"):
+        annonce["etage"] = etage
+        rempli = True
+
+    description = str(donnees.get("description") or "").strip()
+    if description and not annonce.get("description"):
+        annonce["description"] = re.sub(r"\s+", " ", description)[:2000]
+        rempli = True
+
+    pieces = donnees.get("roomsQuantity")
+    if pieces and not annonce.get("pieces"):
+        try:
+            annonce["pieces"] = int(pieces)
+            rempli = True
+        except (TypeError, ValueError):
+            pass
+
+    return rempli
+
 ENTETES = {
     "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -113,6 +172,24 @@ def enrichir(annonce, session=None):
         return annonce
 
     sess = session or requests.Session()
+
+    bienici = RE_BIENICI_ID.search(url)
+    if bienici:
+        try:
+            _pause()
+            rep = sess.get(BIENICI_JSON.format(bienici.group(1)),
+                           headers=ENTETES, timeout=TIMEOUT)
+            if rep.status_code != 200:
+                print(f"  [Enrich] {rep.status_code} sur la fiche JSON "
+                      f"{bienici.group(1)}")
+                return annonce
+            if not appliquer_donnees_bienici(annonce, rep.json()):
+                print(f"  [Enrich] Fiche JSON sans donnée utile : "
+                      f"{bienici.group(1)}")
+        except Exception as e:
+            print(f"  [Enrich] Échec sur la fiche JSON {bienici.group(1)} : {e}")
+        return annonce
+
     try:
         _pause()
         rep = sess.get(url, headers=ENTETES, timeout=TIMEOUT, allow_redirects=True)

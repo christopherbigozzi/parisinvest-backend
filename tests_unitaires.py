@@ -13,7 +13,8 @@ from dedup import (normaliser_url, id_annonce, empreinte, similarite_titre,
                    meme_bien, grouper)
 from scoring import calculer_marge, calculer_score, _points_travaux
 from enricher import (extraire_dpe, extraire_etage, extraire_pieces,
-                      page_atteignable)
+                      page_atteignable, appliquer_donnees_bienici,
+                      _etage_depuis_json)
 
 echecs = []
 
@@ -187,6 +188,43 @@ verifier("un lien de tracking SeLoger est écarté",
          False)
 verifier("une URL vide est écartée", page_atteignable({"url": ""}), False)
 verifier("une annonce sans URL est écartée", page_atteignable({}), False)
+
+print("\n── Fiche JSON Bien'ici ──────────────────────────────────────────")
+# La page HTML de Bien'ici est une coquille JavaScript : rien à y lire. Son
+# front s'alimente à realEstateAd.json, qui rend les mêmes champs sans script.
+# Extrait réel de la fiche apimo-86344937, relevé le 17/08/2026.
+FICHE = {
+    "energyClassification": "G",
+    "energyValue": 689,
+    "greenhouseGazClassification": "C",
+    "floor": 4,
+    "floorQuantity": 5,
+    "description": "Situé au cœur des Abbesses   dans une rue piétonne...",
+    "surfaceArea": 30.5,
+    "roomsQuantity": 2,
+    "price": 389000,
+}
+
+a = {"dpe": "", "etage": None, "description": "", "pieces": 0}
+verifier("la fiche renseigne quelque chose", appliquer_donnees_bienici(a, FICHE), True)
+verifier("DPE repris de la fiche", a["dpe"], "G")
+verifier("étage repris de la fiche", a["etage"], "4e")
+verifier("pièces reprises de la fiche", a["pieces"], 2)
+affirmer("description normalisée, sans espaces multiples",
+         a["description"].startswith("Situé au cœur des Abbesses dans une rue"))
+
+# Le mail fait foi sur ce qu'il a déjà donné : la fiche complète, elle n'écrase pas.
+b = {"dpe": "D", "etage": "2e", "description": "déjà là", "pieces": 3}
+appliquer_donnees_bienici(b, FICHE)
+verifier("un DPE déjà connu n'est pas écrasé", b["dpe"], "D")
+verifier("un étage déjà connu n'est pas écrasé", b["etage"], "2e")
+verifier("des pièces déjà connues ne sont pas écrasées", b["pieces"], 3)
+
+verifier("rez-de-chaussée", _etage_depuis_json(0), "RDC")
+verifier("étage absent de la fiche", _etage_depuis_json(None), "")
+verifier("une fiche vide ne renseigne rien", appliquer_donnees_bienici({}, {}), False)
+verifier("une réponse inattendue ne fait pas planter",
+         appliquer_donnees_bienici({}, "erreur"), False)
 
 print("\n" + "=" * 64)
 if echecs:
