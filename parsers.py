@@ -174,6 +174,29 @@ def _extraire_photo(bloc, motif_photo):
     return url or None
 
 
+def _photos_par_ident(texte, motif_photo):
+    """
+    Indexe les URL de photo par identifiant d'annonce, quand l'URL le porte.
+
+    C'est la seule association fiable. Dans le corps du mail, la photo d'une
+    annonce est placée *avant* le lien de cette annonce ; comme les blocs
+    commencent à la position du lien, un rattachement par position donne à
+    chaque annonce la photo de la suivante — et laisse la dernière sans photo.
+
+    Renvoie un dictionnaire vide si le motif du portail ne capture pas
+    d'identifiant : on retombe alors sur la recherche dans le bloc.
+    """
+    if not motif_photo or motif_photo.groups < 1:
+        return {}
+
+    photos = {}
+    for m in motif_photo.finditer(texte):
+        ident = m.group(1)
+        if ident and ident not in photos:
+            photos[ident] = m.group(0).rstrip(".,);]")
+    return photos
+
+
 def parser_bloc(ident, bloc, source, config):
     surface_match = RE_SURFACE.search(bloc)
     surface = _nombre(surface_match.group(1)) if surface_match else 0.0
@@ -252,10 +275,11 @@ def parser_alerte(alerte):
         print(f"  [Parse] Portail non géré : {source}")
         return []
 
-    blocs = []
+    blocs, texte = [], ""
     for candidat in _candidats_corps(alerte):
         blocs = _decouper_en_blocs(candidat, config["lien_annonce"])
         if blocs:
+            texte = candidat
             break
 
     if not blocs:
@@ -264,6 +288,7 @@ def parser_alerte(alerte):
         return []
 
     recu = alerte.get("date") or datetime.now(timezone.utc)
+    photos = _photos_par_ident(texte, config.get("lien_photo"))
     annonces, vus = [], set()
 
     for ident, bloc in blocs:
@@ -273,6 +298,9 @@ def parser_alerte(alerte):
         annonce = parser_bloc(ident, bloc, source, config)
         if not annonce:
             continue
+        if photos:
+            # Mieux vaut pas de photo qu'une photo qui n'est pas la bonne.
+            annonce["photo"] = photos.get(ident)
         annonce["date_publi"] = recu.isoformat() if hasattr(recu, "isoformat") else str(recu)
         annonce["gmail_id"] = alerte.get("id", "")
         annonces.append(annonce)

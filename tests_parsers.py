@@ -83,6 +83,13 @@ if len(annonces) == 3:
 
     affirmer("les photos ne sont jamais celles de l'agence",
              all("5528f3ca" not in (a.get("photo") or "") for a in annonces))
+    # Régression du 17/08/2026 : la photo était rattachée par position, or elle
+    # précède le lien de son annonce dans le mail. Chaque annonce héritait donc
+    # de la photo de la suivante, et la dernière n'en avait aucune.
+    for rang, a in enumerate(annonces, start=1):
+        affirmer(f"annonce {rang} — la photo est bien la sienne",
+                 a["ident"] in (a.get("photo") or ""),
+                 f"ident {a['ident']} absent de {a.get('photo')!r}")
     affirmer("le lien « Voir tous les biens de l'agence » n'est pas pris "
              "pour une annonce",
              all("annonces-apimo-6612" not in a["url"] for a in annonces))
