@@ -93,6 +93,58 @@ if len(annonces) == 3:
     affirmer("la date de publication reprend la date du mail",
              all(a["date_publi"].startswith("2026-08-12") for a in annonces))
 
+print("\n── Choix du corps : texte vs HTML tracé ─────────────────────────")
+# Régression du 17/08/2026. Le parseur gardait le corps le plus long, donc
+# toujours le HTML — dont les liens passent par le traceur du portail, qui
+# encode l'URL de destination. Résultat : 92 mails lus, 0 annonce extraite,
+# alors que la version texte du même mail portait les liens en clair.
+#
+# Les URL ci-dessous sont celles d'un vrai mail Bien'ici du 17/08/2026 ;
+# l'enrobage de tracking est reconstitué, Gmail ne restituant que le corps.
+
+LIEN_CLAIR = "https://www.bienici.com/annonce/immo-facile-61357036"
+LIEN_TRACE = ("https://mail-sender.bienici.com/c/click?u="
+              "https%3A%2F%2Fwww.bienici.com%2Fannonce%2Fimmo-facile-61357036")
+
+corps_texte = (
+    f"Appartement 2 pièces 34 m²\n[{LIEN_CLAIR}]\n75018 Paris 18e\n"
+    f"319 000 €\n[{LIEN_CLAIR}]\n"
+)
+# Volontairement plus long que la version texte, comme dans la réalité.
+corps_html = (
+    "<html><body><p>Bonne nouvelle, 1 nouvelle annonce correspond à votre "
+    "alerte ! Gérez vos alertes, désinscription, mentions légales, "
+    "conditions générales d'utilisation, politique de confidentialité.</p>"
+    f"<a href=\"{LIEN_TRACE}\">Appartement 2 pièces 34 m²</a>"
+    "<p>75018 Paris 18e</p>"
+    f"<a href=\"{LIEN_TRACE}\">319 000 €</a></body></html>"
+)
+
+mail_mixte = {"id": "regression-17-08", "source": "bienici",
+              "sujet": "1 nouvelle annonce pour « zone personnalisée »",
+              "expediteur": "no_reply@bienici.com",
+              "date": datetime(2026, 8, 17, 11, 50, tzinfo=timezone.utc),
+              "html": corps_html, "texte": corps_texte}
+
+resultat = parser_alerte(mail_mixte)
+verifier("le corps texte est lu même quand le HTML est plus long",
+         len(resultat), 1)
+if resultat:
+    verifier("identifiant du nouveau format d'agence",
+             resultat[0]["ident"], "immo-facile-61357036")
+    verifier("surface lue", resultat[0]["surface"], 34.0)
+    verifier("prix lu", resultat[0]["prix"], 319000.0)
+
+# Cas limite : le portail cesse d'envoyer une version texte. Le lien tracé
+# doit alors être déplié pour rester exploitable.
+mail_html_seul = {**mail_mixte, "id": "regression-html-seul", "texte": ""}
+resultat_html = parser_alerte(mail_html_seul)
+verifier("un lien tracé est déplié quand il n'y a que du HTML",
+         len(resultat_html), 1)
+if resultat_html:
+    verifier("identifiant retrouvé dans le lien tracé",
+             resultat_html[0]["ident"], "immo-facile-61357036")
+
 print("\n── Robustesse ───────────────────────────────────────────────────")
 vide = {"id": "x", "source": "bienici", "sujet": "vide", "date": None,
         "html": "", "texte": ""}

@@ -11,14 +11,23 @@ Ce découpage résiste aux refontes graphiques : tant que le mail contient un
 lien par annonce et le prix en toutes lettres à côté, il continue de marcher.
 Un parseur fondé sur les classes CSS casserait à la première refonte.
 
+Choix du corps à lire : un mail d'alerte arrive en multipart/alternative, avec
+une version texte et une version HTML. La version texte porte les URL en clair.
+La version HTML est plus longue, mais ses liens passent souvent par le traceur
+du portail, qui encode l'URL de destination dans un paramètre — le motif de
+lien ne la reconnaît alors plus, et le mail ressort vide. On essaie donc les
+corps l'un après l'autre et on garde le premier qui produit des blocs, au lieu
+de choisir le plus long.
+
 État de calibrage :
-  bienici    calibré sur un mail réel du 12/08/2026
+  bienici    calibré sur des mails réels du 12/08/2026 et du 17/08/2026
   seloger    à confirmer sur un mail réel
   jinka      à confirmer sur un mail réel
   leboncoin  à confirmer sur un mail réel
 """
 import re
 from datetime import datetime, timezone
+from urllib.parse import unquote
 
 from bs4 import BeautifulSoup
 
@@ -203,6 +212,34 @@ def parser_bloc(ident, bloc, source, config):
     }
 
 
+def _candidats_corps(alerte):
+    """
+    Corps possibles du mail, du plus fiable au moins fiable.
+
+    Ordre : la version texte d'abord, puis la version HTML convertie, puis les
+    deux repassées par unquote. Ce dernier passage déplie les liens de tracking
+    du genre .../click?u=https%3A%2F%2Fwww.bienici.com%2Fannonce%2F..., dont
+    l'URL encodée échappe au motif de lien.
+
+    On ne choisit plus « le corps le plus long » : le HTML l'est presque
+    toujours, et c'est justement celui dont les liens sont tracés.
+    """
+    html = alerte.get("html") or ""
+    corps = [alerte.get("texte") or ""]
+    if html:
+        corps.append(texte_depuis_html(html))
+
+    candidats = []
+    for brut in corps:
+        if not brut:
+            continue
+        candidats.append(brut)
+        deplie = unquote(brut)
+        if deplie != brut:
+            candidats.append(deplie)
+    return candidats
+
+
 def parser_alerte(alerte):
     """
     Transforme un mail d'alerte en liste d'annonces.
@@ -215,17 +252,12 @@ def parser_alerte(alerte):
         print(f"  [Parse] Portail non géré : {source}")
         return []
 
-    texte = alerte.get("texte") or ""
-    if alerte.get("html"):
-        texte_html = texte_depuis_html(alerte["html"])
-        # On garde la version la plus riche des deux.
-        if len(texte_html) > len(texte):
-            texte = texte_html
+    blocs = []
+    for candidat in _candidats_corps(alerte):
+        blocs = _decouper_en_blocs(candidat, config["lien_annonce"])
+        if blocs:
+            break
 
-    if not texte:
-        return []
-
-    blocs = _decouper_en_blocs(texte, config["lien_annonce"])
     if not blocs:
         print(f"  [Parse] Aucun lien d'annonce trouvé ({source}) : "
               f"{alerte.get('sujet','')[:60]}")
