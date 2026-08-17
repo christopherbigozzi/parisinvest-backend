@@ -22,6 +22,14 @@ from config import ENRICH_MAX
 DELAI_ENTRE_APPELS = (2.0, 4.5)   # secondes, tiré au hasard dans l'intervalle
 TIMEOUT            = 12
 
+# Domaines qui ne mènent pas à une page d'annonce. Les alertes SeLoger ne
+# contiennent que des liens de tracking : ils répondent 403 à tout client qui
+# n'est pas un vrai navigateur, User-Agent réaliste ou non — la détection va
+# au-delà des en-têtes. Les viser brûle les places du cycle pour rien : sur le
+# cycle du 17/08/2026, les dix tentatives ont échoué sur ces liens, et aucune
+# annonce Bien'ici, pourtant dotée d'une URL exploitable, n'a eu sa chance.
+DOMAINES_SANS_PAGE = ("click.by.seloger.com",)
+
 ENTETES = {
     "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -143,6 +151,19 @@ def enrichir(annonce, session=None):
     return annonce
 
 
+def page_atteignable(annonce):
+    """
+    Une page d'annonce est-elle joignable derrière cette URL ?
+
+    Faux pour un lien vide et pour les liens de tracking, qui ne rendent la
+    page qu'à un vrai navigateur.
+    """
+    url = (annonce.get("url") or "").strip().lower()
+    if not url.startswith("http"):
+        return False
+    return not any(domaine in url for domaine in DOMAINES_SANS_PAGE)
+
+
 def enrichir_lot(annonces, maximum=None):
     """
     Enrichit au plus `maximum` annonces par cycle, ENRICH_MAX par défaut.
@@ -153,7 +174,20 @@ def enrichir_lot(annonces, maximum=None):
     depuis un serveur dédié.
     """
     maximum = ENRICH_MAX if maximum is None else maximum
-    a_traiter = [a for a in annonces if not a.get("dpe")][:maximum]
+
+    manquantes = [a for a in annonces if not a.get("dpe")]
+    candidates = [a for a in manquantes if page_atteignable(a)]
+    ignorees = len(manquantes) - len(candidates)
+
+    # Les places sont rares : on les donne aux annonces dont la marge
+    # justifierait une visite, pas aux premières venues. Sans ce tri, un
+    # portail bavard occupe tout le quota et les autres n'ont jamais leur tour.
+    candidates.sort(key=lambda a: float(a.get("marge_pct") or 0), reverse=True)
+    a_traiter = candidates[:maximum]
+
+    if ignorees:
+        print(f"  [Enrich] {ignorees} annonce(s) sans page atteignable "
+              f"(lien de tracking), écartée(s)")
     if not a_traiter:
         return annonces
 

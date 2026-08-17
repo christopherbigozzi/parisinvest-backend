@@ -12,7 +12,8 @@ os.environ.setdefault("SUPABASE_KEY", "cle-de-test")
 from dedup import (normaliser_url, id_annonce, empreinte, similarite_titre,
                    meme_bien, grouper)
 from scoring import calculer_marge, calculer_score, _points_travaux
-from enricher import extraire_dpe, extraire_etage, extraire_pieces
+from enricher import (extraire_dpe, extraire_etage, extraire_pieces,
+                      page_atteignable)
 
 echecs = []
 
@@ -170,6 +171,22 @@ verifier("absence de DPE renvoie une chaîne vide",
 verifier("étage numérique", extraire_etage("Situé au 4ème étage avec ascenseur"), "4e")
 verifier("rez-de-chaussée", extraire_etage("Appartement en rez-de-chaussée"), "RDC")
 verifier("nombre de pièces", extraire_pieces("Bel appartement 3 pièces de 62 m²"), 3)
+
+print("\n── Pages atteignables pour l'enrichissement ─────────────────────")
+# Cycle du 17/08/2026 : les dix places d'enrichissement sont parties sur des
+# liens de tracking SeLoger, tous en 403, pendant que les annonces Bien'ici —
+# dont l'URL mène vraiment à la page — n'ont jamais eu leur tour.
+verifier("une URL d'annonce Bien'ici est exploitable",
+         page_atteignable({"url": "https://www.bienici.com/annonce/apimo-86344937"}),
+         True)
+verifier("une URL d'annonce SeLoger directe est exploitable",
+         page_atteignable({"url": "https://www.seloger.com/annonces/123456789.htm"}),
+         True)
+verifier("un lien de tracking SeLoger est écarté",
+         page_atteignable({"url": "https://click.by.seloger.com/?qs=ABB7InYiOjE"}),
+         False)
+verifier("une URL vide est écartée", page_atteignable({"url": ""}), False)
+verifier("une annonce sans URL est écartée", page_atteignable({}), False)
 
 print("\n" + "=" * 64)
 if echecs:
