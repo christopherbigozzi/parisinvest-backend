@@ -100,6 +100,59 @@ if len(annonces) == 3:
     affirmer("la date de publication reprend la date du mail",
              all(a["date_publi"].startswith("2026-08-12") for a in annonces))
 
+print("\n── SeLoger — mail du 17/08/2026, sans identifiant ───────────────")
+# Tous les liens d'un mail SeLoger passent par click.by.seloger.com avec un
+# jeton opaque : aucun identifiant d'annonce dans le corps, même encodé. Le
+# découpage se fait donc sur l'en-tête « prix € prix/m² €/m² » et l'identité
+# est forgée depuis le contenu.
+#
+# Fixture : mail authentique du 17/08/2026. Seuls les jetons de tracking ont
+# été raccourcis, pour rester lisibles — le parseur ne s'appuie pas dessus.
+
+sel = parser_alerte(charger("seloger_2026-08-17.txt", "seloger"))
+
+verifier("trois annonces extraites", len(sel), 3)
+
+if len(sel) == 3:
+    s1, s2, s3 = sel
+
+    verifier("annonce 1 — surface au centième", s1["surface"], 22.1)
+    verifier("annonce 1 — prix", s1["prix"], 304000.0)
+    verifier("annonce 1 — une pièce", s1["pieces"], 1)
+    verifier("annonce 3 — surface au centième", s3["surface"], 55.17)
+    verifier("annonce 3 — prix", s3["prix"], 599000.0)
+    verifier("annonce 3 — trois pièces", s3["pieces"], 3)
+
+    # SeLoger affiche lui-même le prix au m² : il doit retomber sur prix/surface.
+    # C'est le contrôle le plus parlant sur ce parseur, il croise deux champs
+    # lus séparément dans le mail.
+    for rang, (a, attendu) in enumerate(zip(sel, (13756, 10865, 10857)), start=1):
+        verifier(f"annonce {rang} — prix/m² conforme à celui annoncé",
+                 round(a["prix"] / a["surface"]), attendu)
+
+    affirmer("le quartier est repris dans l'adresse",
+             s1["adresse"].startswith("Montmartre")
+             and s3["adresse"].startswith("Clignancourt"))
+    affirmer("le code postal est présent",
+             all("75018" in a["adresse"] for a in sel))
+    affirmer("les titres ne sont pas des libellés de pied de page",
+             all("fréquence" not in a["titre"].lower()
+                 and "confidentialité" not in a["titre"].lower() for a in sel))
+    affirmer("chaque annonce a un identifiant distinct",
+             len({a["ident"] for a in sel}) == 3)
+    affirmer("l'URL reste cliquable même si elle est tracée",
+             all(a["url"].startswith("https://click.by.seloger.com/") for a in sel))
+    affirmer("le prix n'entre pas dans l'identifiant",
+             all(str(int(a["prix"])) not in a["ident"] for a in sel))
+
+    # Invariant décisif : le jeton de tracking change à chaque envoi. Si
+    # l'identité en dépendait, chaque cycle créerait des doublons.
+    renvoi = charger("seloger_2026-08-17.txt", "seloger")
+    renvoi["texte"] = renvoi["texte"].replace("jeton", "AUTREJETON")
+    sel_bis = parser_alerte(renvoi)
+    verifier("un nouvel envoi du même mail donne les mêmes identifiants",
+             [a["ident"] for a in sel_bis], [a["ident"] for a in sel])
+
 print("\n── Choix du corps : texte vs HTML tracé ─────────────────────────")
 # Régression du 17/08/2026. Le parseur gardait le corps le plus long, donc
 # toujours le HTML — dont les liens passent par le traceur du portail, qui

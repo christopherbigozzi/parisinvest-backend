@@ -53,6 +53,105 @@ TYPES_BIEN = re.compile(
     r"\b(appartement|studio|duplex|loft|maison|villa|immeuble|local|terrain)\b", re.I
 )
 
+# ─── SeLoger : découpage sans identifiant ────────────────────────────────────
+# Tous les liens d'un mail SeLoger passent par click.by.seloger.com avec un
+# jeton opaque : le corps ne contient aucun identifiant d'annonce, même encodé.
+# Le découpage s'appuie donc sur l'en-tête de bloc, qui est très régulier :
+#
+#     304 000 € 13 756 €/m²
+#     Etage élevé avec ascenseur, balcon et vue Sacré Co...
+#     1 pièce . 22,1 m²
+#      Montmartre,
+#      Paris 18ème arrondissement
+#      (75018)
+#
+# Le prix au m² annoncé sert de contrôle : il doit retomber sur prix / surface.
+RE_SELOGER_ENTETE = re.compile(
+    r"(\d[\d\s  ]{2,12})\s*€\s+(\d[\d\s  ]{2,12})\s*€\s*/\s*m²"
+)
+# Pied de page : sans cette coupure, le dernier bloc avale les mentions légales
+# et y pêche un faux titre.
+RE_SELOGER_FIN = re.compile(
+    r"Changez facilement la fréquence|Gérer mes alertes et abonnements|"
+    r"Cet e-mail vous a été envoyé|Politique de Confidentialité"
+)
+RE_SELOGER_CP = re.compile(r"\((\d{5})\)")
+# Le quartier occupe sa propre ligne et se termine par une virgule.
+RE_SELOGER_QUARTIER = re.compile(r"^\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9''\- ]{2,40}),\s*$", re.M)
+RE_SELOGER_PIECES_SURFACE = re.compile(
+    r"^\s*\d{1,2}\s*pi[èe]ces?\s*[.·]\s*[\d,.]+\s*m²\s*$", re.M
+)
+
+
+def _titre_seloger(bloc):
+    """
+    Le titre est la première ligne exploitable après l'en-tête de prix.
+
+    Les titres SeLoger ne commencent pas par un type de bien (« Etage élevé
+    avec ascenseur… », « Charmant 3 pièces - Lamarck / Caulaincourt »), donc
+    ni RE_TITRE ni son repli sur TYPES_BIEN ne les trouvent.
+    """
+    lignes = bloc.split("\n")
+    for ligne in lignes[1:]:
+        ligne = ligne.strip()
+        if not ligne or "http" in ligne:
+            continue
+        if RE_SELOGER_ENTETE.search(ligne) or RE_SELOGER_PIECES_SURFACE.match(ligne):
+            continue
+        if 8 <= len(ligne) <= 150:
+            return re.sub(r"\s+", " ", ligne).strip("… .")[:150]
+    return ""
+
+
+def _adresse_seloger(bloc):
+    """« Montmartre, Paris 18ème arrondissement (75018) » → adresse compacte."""
+    cp = RE_SELOGER_CP.search(bloc)
+    code = cp.group(1) if cp else ""
+    limite = cp.start() if cp else len(bloc)
+    quartier = ""
+    for m in RE_SELOGER_QUARTIER.finditer(bloc[:limite]):
+        candidat = m.group(1).strip()
+        # « Paris 18ème arrondissement » n'est pas un quartier.
+        if "arrondissement" in candidat.lower():
+            continue
+        quartier = candidat
+    morceaux = [p for p in (quartier, f"{code} Paris 18e" if code else "") if p]
+    return ", ".join(morceaux)[:120]
+
+
+def _cle_contenu(titre, surface, pieces, adresse):
+    """
+    Identité de repli quand le portail ne fournit aucun identifiant.
+
+    Le prix en est volontairement absent : chez SeLoger l'URL change à chaque
+    envoi, donc l'identité doit venir du contenu — et si le prix en faisait
+    partie, une baisse créerait une ligne neuve au lieu de mettre à jour
+    l'existante, ce qui priverait le scoring du compteur de baisses.
+    """
+    titre_norm = re.sub(r"[^a-z0-9]+", "-", (titre or "").lower()).strip("-")[:60]
+    quartier = re.sub(r"[^a-z0-9]+", "-", (adresse or "").lower()).strip("-")[:40]
+    return f"{surface:g}-{int(pieces or 0)}p-{quartier}-{titre_norm}"
+
+
+def _decouper_par_entete(texte, motif_entete, motif_fin=None):
+    """Découpe [(None, bloc)] à chaque en-tête, sans identifiant d'annonce."""
+    debuts = [m.start() for m in motif_entete.finditer(texte)]
+    if not debuts:
+        return []
+
+    fin_utile = len(texte)
+    if motif_fin:
+        for m in motif_fin.finditer(texte):
+            if m.start() > debuts[-1]:
+                fin_utile = m.start()
+                break
+
+    blocs = []
+    for i, debut in enumerate(debuts):
+        fin = debuts[i + 1] if i + 1 < len(debuts) else fin_utile
+        blocs.append((None, texte[debut:fin]))
+    return blocs
+
 
 def _nombre(brut):
     """« 1 495 000 » → 1495000.0, en tolérant tous les espaces exotiques."""
@@ -97,6 +196,11 @@ PORTAILS = {
         ),
         "lien_photo":   re.compile(r"https?://v\.seloger\.com/s/[^\s\]]+"),
         "base_url":     "https://www.seloger.com/annonces/{}.htm",
+        # Repli quand aucun lien d'annonce n'est lisible : tous les liens du
+        # mail passent par click.by.seloger.com avec un jeton opaque.
+        "entete_bloc":  RE_SELOGER_ENTETE,
+        "fin_bloc":     RE_SELOGER_FIN,
+        "lien_secours": re.compile(r"https?://click\.by\.seloger\.com/\?qs=[^\s\]]+"),
     },
     "jinka": {
         "lien_annonce": re.compile(r"https?://(?:www\.)?jinka\.fr/[^\s\]]*?ad[=/]([\w\-]+)"),
@@ -208,21 +312,41 @@ def parser_bloc(ident, bloc, source, config):
     pieces_match = RE_PIECES.search(bloc)
     pieces = int(_nombre(pieces_match.group(1))) if pieces_match else 0
 
-    adresse = "Paris 18e"
-    cp_match = RE_CP_VILLE.search(bloc) or RE_CP_VILLE_LARGE.search(bloc)
-    if cp_match:
-        adresse = f"{cp_match.group(1)} {cp_match.group(2).strip()}"[:120]
+    sans_identifiant = ident is None
+
+    adresse = ""
+    if sans_identifiant:
+        adresse = _adresse_seloger(bloc)
+    if not adresse:
+        cp_match = RE_CP_VILLE.search(bloc) or RE_CP_VILLE_LARGE.search(bloc)
+        adresse = (f"{cp_match.group(1)} {cp_match.group(2).strip()}"[:120]
+                   if cp_match else "Paris 18e")
+
+    titre = (_titre_seloger(bloc) if sans_identifiant else "") or _extraire_titre(bloc)
+    titre = titre or f"Appartement {surface:.0f} m²"
 
     ref_match = RE_REFERENCE.search(bloc)
+    ref_source = ref_match.group(1) if ref_match else ""
 
     lien = config["lien_annonce"].search(bloc)
-    url = lien.group(0) if lien else config["base_url"].format(ident)
+    if lien:
+        url = lien.group(0)
+    elif sans_identifiant:
+        # Le lien de tracking reste cliquable pour un humain, mais il change à
+        # chaque envoi : l'identité doit donc venir du contenu, pas de l'URL.
+        secours = config.get("lien_secours")
+        lien_traceur = secours.search(bloc) if secours else None
+        url = lien_traceur.group(0) if lien_traceur else ""
+        ident = _cle_contenu(titre, surface, pieces, adresse)
+        ref_source = ref_source or ident
+    else:
+        url = config["base_url"].format(ident)
 
     return {
         "source":     source,
-        "ref_source": ref_match.group(1) if ref_match else "",
+        "ref_source": ref_source,
         "ident":      ident,
-        "titre":      _extraire_titre(bloc) or f"Appartement {surface:.0f} m²",
+        "titre":      titre,
         "adresse":    adresse,
         "surface":    surface,
         "pieces":     pieces,
@@ -278,6 +402,10 @@ def parser_alerte(alerte):
     blocs, texte = [], ""
     for candidat in _candidats_corps(alerte):
         blocs = _decouper_en_blocs(candidat, config["lien_annonce"])
+        if not blocs and config.get("entete_bloc"):
+            blocs = _decouper_par_entete(
+                candidat, config["entete_bloc"], config.get("fin_bloc")
+            )
         if blocs:
             texte = candidat
             break
@@ -292,12 +420,16 @@ def parser_alerte(alerte):
     annonces, vus = [], set()
 
     for ident, bloc in blocs:
-        if ident in vus:
+        if ident is not None and ident in vus:
             continue
-        vus.add(ident)
         annonce = parser_bloc(ident, bloc, source, config)
         if not annonce:
             continue
+        # L'identifiant peut être forgé depuis le contenu du bloc : on ne
+        # dédoublonne donc qu'après le parsing.
+        if annonce["ident"] in vus:
+            continue
+        vus.add(annonce["ident"])
         if photos:
             # Mieux vaut pas de photo qu'une photo qui n'est pas la bonne.
             annonce["photo"] = photos.get(ident)
