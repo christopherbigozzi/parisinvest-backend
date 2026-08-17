@@ -15,6 +15,8 @@ from scoring import calculer_marge, calculer_score, _points_travaux
 from enricher import (extraire_dpe, extraire_etage, extraire_pieces,
                       page_atteignable, appliquer_donnees_bienici,
                       _etage_depuis_json)
+from parsers import surface_vendable
+from zone_filter import est_dans_zone
 
 echecs = []
 
@@ -225,6 +227,52 @@ verifier("étage absent de la fiche", _etage_depuis_json(None), "")
 verifier("une fiche vide ne renseigne rien", appliquer_donnees_bienici({}, {}), False)
 verifier("une réponse inattendue ne fait pas planter",
          appliquer_donnees_bienici({}, "erreur"), False)
+
+print("\n── Périmètre : la Butte stricte ─────────────────────────────────")
+# Le 18e va de la Butte à la Porte de Clignancourt et à la Goutte d'Or, des
+# marchés sans rapport. Comme le filtre acceptait tout ce qui portait 75018,
+# les biens de ces quartiers, moins chers donc de meilleure marge apparente,
+# occupaient les premières places du classement. Cas relevés le 17/08/2026.
+CAS_ZONE = [
+    # Hors périmètre
+    ("Paris 19? Élégant 2/3 pièces avec fort potentiel", "75018 Paris 18e", False),
+    ("Superbe 2P Paris 9ème arrondissement", "75018 Paris 18e", False),
+    ("Appartement 75011 à rénover", "75018 Paris 18e", False),
+    ("M° La Chapelle - 2 pièces 45m² (22m² LC)", "75018 Paris 18e", False),
+    ("3P Paris 18e Marcadet Poissonniers", "75018 Paris 18e", False),
+    ("COUP DE COEUR _ VILLAGE RAMEY", "75018 Paris 18e", False),
+    ("Charmant 3 pièces - Lamarck / Caulaincourt",
+     "Clignancourt-Jules Joffrin, 75018 Paris 18e", False),
+    # Dans le périmètre
+    ("PARIS 18 - Rue Muller, Appartement 2 pièces", "75018 Paris 18e", True),
+    ("Un appartement au calme, en plein Montmartre", "75018 Paris 18e", True),
+    ("Etage élevé avec ascenseur, vue Sacré Coeur",
+     "Montmartre, 75018 Paris 18e", True),
+    ("Appartement 2 pièces de 48 m² à rénover", "75018 Paris 18e", True),
+    # Un nombre après « Paris » n'est pas toujours un arrondissement
+    ("Bel appartement Paris 3 pièces plein sud",
+     "Montmartre, 75018 Paris 18e", True),
+    ("Appartement Paris 60 m² proche Abbesses",
+     "Montmartre, 75018 Paris 18e", True),
+]
+for titre, adresse, attendu in CAS_ZONE:
+    verifier(f"{'gardé ' if attendu else 'rejeté'} — {titre[:44]}",
+             est_dans_zone({"titre": titre, "adresse": adresse}), attendu)
+
+print("\n── Surface au sol contre surface Carrez ─────────────────────────")
+# Seule la surface Carrez se vend. Les combles de la Butte en sont pleins :
+# « 2 pièces 45m² (22m² LC) » affichait 87 % de marge sur 45 m², plus rien
+# sur 22 — et trônait en tête du classement.
+verifier("deux surfaces et mention LC : la plus petite gagne",
+         surface_vendable("M° La Chapelle - 2 pièces 45m² (22m² LC)", 45.0), 22.0)
+verifier("« au sol » face à « Carrez »",
+         surface_vendable("Duplex 80 m² au sol, 62 m² Carrez", 80.0), 62.0)
+verifier("une seule surface, déjà Carrez : inchangée",
+         surface_vendable("EXCLUSIVITÉ - Rue Hermel - 39.57 m² LC", 39.57), 39.57)
+verifier("sans mention Carrez, on ne touche à rien",
+         surface_vendable("Appartement 3 pièces 58 m²", 58.0), 58.0)
+verifier("deux surfaces sans mention : on ne devine pas",
+         surface_vendable("Appartement 58 m² avec cave de 6 m²", 58.0), 58.0)
 
 print("\n" + "=" * 64)
 if echecs:

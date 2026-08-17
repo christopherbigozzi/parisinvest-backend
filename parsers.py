@@ -83,6 +83,34 @@ RE_SELOGER_PIECES_SURFACE = re.compile(
 )
 
 
+# « Surface au sol » contre surface Carrez : seule la seconde se vend. Les
+# combles et sous-pentes de la Butte en sont pleins, et l'écart peut aller du
+# simple au double — « 2 pièces 45m² (22m² LC) » vu le 17/08/2026 affichait
+# 87 % de marge sur 45 m², plus rien sur 22.
+RE_MENTION_CARREZ = re.compile(r"\b(LC|carrez|loi\s*carrez|au\s*sol|utile)\b", re.I)
+RE_SURFACES_TITRE = re.compile(r"(\d{1,4}(?:[.,]\d{1,2})?)\s*m[²2]", re.I)
+
+
+def surface_vendable(titre, surface_annoncee):
+    """
+    Retient la plus petite surface quand le titre en oppose deux.
+
+    Sans mention explicite de loi Carrez ou de surface au sol, on ne touche à
+    rien : deux surfaces peuvent désigner le lot et sa cave, et rien ne dit
+    laquelle est la bonne.
+    """
+    if not titre or not RE_MENTION_CARREZ.search(titre):
+        return surface_annoncee
+
+    surfaces = [_nombre(m.group(1)) for m in RE_SURFACES_TITRE.finditer(titre)]
+    surfaces = [s for s in surfaces if s > 0]
+    if len(surfaces) < 2:
+        return surface_annoncee
+
+    plus_petite = min(surfaces)
+    return plus_petite if plus_petite < surface_annoncee else surface_annoncee
+
+
 def _titre_seloger(bloc):
     """
     Le titre est la première ligne exploitable après l'en-tête de prix.
@@ -324,6 +352,8 @@ def parser_bloc(ident, bloc, source, config):
 
     titre = (_titre_seloger(bloc) if sans_identifiant else "") or _extraire_titre(bloc)
     titre = titre or f"Appartement {surface:.0f} m²"
+
+    surface = surface_vendable(titre, surface)
 
     ref_match = RE_REFERENCE.search(bloc)
     ref_source = ref_match.group(1) if ref_match else ""
