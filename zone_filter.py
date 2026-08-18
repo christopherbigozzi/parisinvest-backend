@@ -54,6 +54,9 @@ RUES_BUTTE = {
     "poulbot", "abreuvoir", "mont cenis", "chevalier de la barre",
     "muller", "tertre", "sacre coeur", "sacré-coeur", "paul albert",
     "andre barsacq", "drevet", "dalida", "villa leandre", "cite nollez",
+    "burq", "aristide bruant", "yvonne le tac", "la vieuville", "orsel",
+    "germain pilon", "coustou", "piemontesi", "andre antoine", "feutrier",
+    "nicolet", "seveste", "livingstone", "antoinette", "veron",
     # Flancs nord et ouest
     "caulaincourt", "lamarck", "francoeur", "saint vincent",
     # Pied sud, côté Anvers et Sacré-Cœur
@@ -103,6 +106,15 @@ LIEUX_HORS_ZONE = {
     # ── Bordure sud : Pigalle, Blanche, Place de Clichy, Anvers-Rochechouart ─
     "pigalle", "place blanche", "rue blanche", "place de clichy",
     "place clichy", "rochechouart", "boulevard de clichy",
+    # ── Arrondissements limitrophes, repères cités dans les descriptions ─────
+    # Les agences vendent un quartier voisin en nommant son métro ou son
+    # église. « NOTRE DAME DE LORETTE » ouvrait une annonce du 9e classée
+    # 75018 par l'alerte, relevée le 18/08/2026.
+    "notre dame de lorette", "faubourg montmartre", "saint georges",
+    "la trinite", "cadet", "grands boulevards", "le peletier",
+    "saint lazare", "batignolles", "cardinet", "rome", "villiers",
+    "stalingrad", "jaures", "colonel fabien", "belleville", "crimee",
+    "porte de la villette", "corentin cariou", "laumiere",
 }
 
 # Conservée sous son ancien nom : d'autres modules l'importent peut-être.
@@ -172,18 +184,24 @@ def extraire_rue(texte):
 
 
 def rue_dans_zone(texte):
-    """Vérifie si une rue mentionnée dans le texte est dans la zone."""
+    """
+    True si la rue citée est une rue de la Butte, None sinon.
+
+    Volontairement, une rue inconnue ne vaut plus rejet. La Butte compte des
+    dizaines de voies et la liste ne sera jamais complète : « rue Burq », bien
+    sur la Butte, était absente et faisait écarter un bien légitime. Le rejet
+    est désormais l'affaire de la seule liste noire, qui est explicite ; la
+    liste blanche ne sert qu'à confirmer.
+    """
     rue = extraire_rue(texte)
     if not rue:
-        return None  # pas de rue trouvée → inconnu
-    rue_norm = rue.lower().strip()
-    for mot in LIEUX_HORS_ZONE:
-        if mot in rue_norm:
-            return False
+        return None
+    rue_norm = _aplatir(rue)
     for mot in RUES_BUTTE:
-        if mot in rue_norm or rue_norm in mot:
+        cle = _aplatir(mot).strip()
+        if f" {cle} " in rue_norm or rue_norm.strip() in cle:
             return True
-    return False
+    return None
 
 
 def _normaliser(texte):
@@ -218,6 +236,35 @@ def motif_exclusion(texte):
         if f" {_aplatir(lieu).strip()} " in plat:
             return lieu
     return ""
+
+
+def localisation_verifiee(annonce):
+    """
+    La localisation repose-t-elle sur une information explicite ?
+
+    Vraie si des coordonnées GPS existent, si le portail nomme un quartier, ou
+    si une rue de la Butte est citée quelque part.
+
+    Fausse quand on ne dispose que de « 75018 ». C'est le cas des alertes
+    SeLoger au format « exclusivités d'agence », qui ne contiennent aucun bloc
+    de localisation : ni quartier, ni rue, ni métro. Ces annonces sont
+    invérifiables depuis le mail, et comme les quartiers bon marché du 18e y
+    sont surreprésentés, elles affichent les meilleures marges apparentes et
+    monopolisaient le haut du classement.
+    """
+    if annonce.get("_lat") and annonce.get("_lon"):
+        return True
+
+    if quartier_connu(str(annonce.get("adresse") or "")) is not None:
+        return True
+
+    texte = " ".join(str(annonce.get(c) or "")
+                     for c in ("titre", "adresse", "description"))
+    plat = _aplatir(texte)
+    # Une rue de la Butte, ou le nom du quartier lui-même : les agences
+    # écrivent souvent « MONTMARTRE » en tête de description.
+    reperes = set(RUES_BUTTE) | set(QUARTIERS_ZONE)
+    return any(f" {_aplatir(repere).strip()} " in plat for repere in reperes)
 
 
 def quartier_connu(adresse):
@@ -278,12 +325,10 @@ def est_dans_zone(annonce):
     if verdict is not None:
         return verdict
 
-    rue_ok = rue_dans_zone(texte_complet)
-    if rue_ok is True:
+    # 5. Une rue de la Butte citée : confirmation. Une rue inconnue ne dit
+    #    rien et n'entraîne plus de rejet.
+    if rue_dans_zone(texte_complet) is True:
         return True
-    if rue_ok is False:
-        # Rue trouvée mais pas dans la zone
-        return False
 
     # 6. Un autre code postal parisien dans l'adresse est un rejet net.
     autre_cp = re.search(r"\b750(0[1-9]|1[0-9]|20)\b", adresse)

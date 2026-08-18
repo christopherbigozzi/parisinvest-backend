@@ -165,6 +165,25 @@ def run():
 
     enrichir_lot(annonces)
 
+    # Second passage du filtre de zone, sur les annonces enrichies.
+    #
+    # Le premier passage a lieu avant l'enrichissement, quand on ne dispose que
+    # du titre et de l'adresse. Or les titres Bien'ici sont génériques
+    # (« Appartement 2 pièces 34 m² ») et la localisation n'apparaît que dans la
+    # description, récupérée plus tard. Deux biens hors périmètre étaient ainsi
+    # passés le 18/08/2026 : un « NOTRE DAME DE LORETTE », qui est dans le 9e,
+    # et un « Village Ramey », hors Butte.
+    avant = len(annonces)
+    annonces = [a for a in annonces if est_dans_zone(a)]
+    ecartees = avant - len(annonces)
+    if ecartees:
+        print(f"  [Filtre] {ecartees} annonce(s) écartée(s) après enrichissement, "
+              f"hors périmètre d'après leur description")
+    if not annonces:
+        print("Aucune annonce dans le périmètre ce cycle.")
+        gmail_client.marquer_lot_traite(ids_mails)
+        return
+
     print("  [ML] Chargement des préférences...")
     vec_likes, vec_dislikes, nb_likes, nb_dislikes = get_preference_vectors()
     print(f"  [ML] {nb_likes} like(s) / {nb_dislikes} dislike(s)")

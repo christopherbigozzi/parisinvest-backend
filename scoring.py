@@ -10,6 +10,7 @@ Répartition du score, sur 100 :
     décote vs prix de marché ..... 25
     potentiel travaux ............  5
     bonus baisses de prix ........ +5, plafonné à 100
+    localisation invérifiable .... −20
 
 Note : les deux composantes « décote vs DVF » et « prix/m² vs moyenne » de la
 version précédente mesuraient la même chose et pesaient 30 points à elles deux.
@@ -25,8 +26,10 @@ fonctions du prix au m². Elles pèsent désormais 75 points à elles deux, donc
 le classement suit très largement le prix au m². C'est assumé — mais si le
 classement paraît un jour trop monolithique, c'est ici qu'il faut regarder.
 """
+import os
 import re
 
+from zone_filter import localisation_verifiee
 from config import (
     TRAVAUX_PAR_M2,
     FRAIS_NOTAIRE,
@@ -161,6 +164,21 @@ def _points_baisses(nb):
     return {0: 0, 1: 1, 2: 3}.get(nb, 5)
 
 
+# Pénalité appliquée quand rien, dans l'annonce, ne permet de situer le bien
+# autrement que par « 75018 ». Le 18e va de la Butte à la Porte de la Chapelle :
+# un bien invérifiable peut être n'importe où, et ce sont justement les
+# quartiers bon marché qui affichent les plus fortes marges. Sans cette
+# pénalité, le haut du classement leur revenait mécaniquement.
+#
+# Le choix est de rétrograder plutôt que d'exclure : quelques-unes de ces
+# annonces sont réellement sur la Butte, elles restent donc consultables.
+PENALITE_LOCALISATION = float(os.getenv("PENALITE_LOCALISATION", "20"))
+
+
+def _penalite_localisation(annonce):
+    return 0 if localisation_verifiee(annonce) else PENALITE_LOCALISATION
+
+
 def calculer_score(annonce, zone="montmartre", score_ml=0):
     """
     `score_ml` est accepté mais ignoré : la composante de préférences apprises
@@ -179,5 +197,6 @@ def calculer_score(annonce, zone="montmartre", score_ml=0):
         )
         + _points_travaux(annonce.get("dpe"), texte)
         + _points_baisses(int(annonce.get("nb_baisses") or 0))
+        - _penalite_localisation(annonce)
     )
-    return max(0, min(score, 100))
+    return max(0, min(int(round(score)), 100))

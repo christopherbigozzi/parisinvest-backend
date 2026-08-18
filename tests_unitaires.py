@@ -16,8 +16,7 @@ from enricher import (extraire_dpe, extraire_etage, extraire_pieces,
                       page_atteignable, appliquer_donnees_bienici,
                       _etage_depuis_json)
 from parsers import surface_vendable
-from zone_filter import est_dans_zone
-from scoring import calculer_marge, calculer_score
+from zone_filter import est_dans_zone, localisation_verifiee
 
 echecs = []
 
@@ -307,9 +306,10 @@ print("\n── Score : marge à 50 points, ML retiré ────────�
 # Les 25 points de préférences apprises valaient zéro faute de like enregistré,
 # ce qui plafonnait le score à 75 — la valeur même de SCORE_ALERTE. Leur poids
 # est reporté sur la marge.
-def _score_de(surface, prix, jours, titre="Appartement", dpe=""):
+def _score_de(surface, prix, jours, titre="Appartement", dpe="",
+              adresse="Montmartre, 75018 Paris 18e"):
     m = calculer_marge(surface, prix)
-    return calculer_score({"titre": titre, "description": "",
+    return calculer_score({"titre": titre, "adresse": adresse, "description": "",
                            "jours_en_ligne": jours, "marge_pct": m["marge_pct"],
                            "prix_m2": m["prix_m2"], "prix_m2_ref": m["prix_m2_ref"],
                            "dpe": dpe, "nb_baisses": 0})
@@ -322,6 +322,31 @@ affirmer("un score de 75 est désormais atteignable",
          _score_de(48.0, 370000, 3, "Appartement 2 pièces de 48 m² à rénover") >= 75)
 affirmer("le score reste borné à 100",
          _score_de(30.0, 100000, 0, "Plateau à rénover, dans son jus", "G") <= 100)
+
+print("\n── Pénalité de localisation invérifiable ────────────────────────")
+# Les alertes SeLoger « exclusivités d'agence » ne donnent aucun quartier, ni
+# rue, ni métro : impossible de distinguer la Butte de la Porte de la Chapelle.
+# Comme les quartiers bon marché y sont surreprésentés, ces annonces montraient
+# les meilleures marges et occupaient le haut du classement.
+verifier("quartier nommé : localisation vérifiée",
+         localisation_verifiee({"adresse": "Montmartre, 75018 Paris 18e"}), True)
+verifier("rue de la Butte citée dans le titre : vérifiée",
+         localisation_verifiee({"titre": "Paris 18ème Lamarck - 32m2 esprit loft",
+                                "adresse": "75018 Paris 18e"}), True)
+verifier("rue de la Butte citée dans la description : vérifiée",
+         localisation_verifiee({"titre": "Appartement 4 pièces 76 m²",
+                                "adresse": "75018 Paris 18e",
+                                "description": "Montmartre / Rue Burq, balcon"}), True)
+verifier("seulement « 75018 » : invérifiable",
+         localisation_verifiee({"titre": "Appartement 2 pièces de 48 m² à rénover",
+                                "adresse": "75018 Paris 18e"}), False)
+
+sans_lieu = _score_de(48.0, 370000, 3, "Appartement 2 pièces de 48 m² à rénover",
+                      adresse="75018 Paris 18e")
+avec_lieu = _score_de(48.0, 370000, 3, "Appartement 2 pièces de 48 m² à rénover")
+verifier("la pénalité vaut bien 20 points", avec_lieu - sans_lieu, 20)
+affirmer("une annonce sans localisation ne franchit plus le seuil d'alerte",
+         sans_lieu < 75)
 
 print("\n" + "=" * 64)
 if echecs:
