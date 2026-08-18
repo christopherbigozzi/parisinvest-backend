@@ -15,7 +15,7 @@ from scoring import calculer_marge, calculer_score, _points_travaux
 from enricher import (extraire_dpe, extraire_etage, extraire_pieces,
                       page_atteignable, appliquer_donnees_bienici,
                       _etage_depuis_json)
-from parsers import surface_vendable
+from parsers import surface_vendable, SUJETS_IGNORES
 from zone_filter import est_dans_zone, localisation_verifiee
 
 echecs = []
@@ -347,6 +347,33 @@ avec_lieu = _score_de(48.0, 370000, 3, "Appartement 2 pièces de 48 m² à réno
 verifier("la pénalité vaut bien 20 points", avec_lieu - sans_lieu, 20)
 affirmer("une annonce sans localisation ne franchit plus le seuil d'alerte",
          sans_lieu < 75)
+
+print("\n── Mails transactionnels écartés avant parsing ──────────────────")
+# Un mail consommé sans résultat est perdu : il repart avec le libellé
+# « traité » et ne sera plus jamais relu. PAP a envoyé trois mails le
+# 18/08/2026 — création de compte, confirmation, création d'alerte — dont un
+# a traversé le filtre et a été brûlé pour rien.
+for sujet in [
+    "Création de votre alerte e-mail",
+    "Création de votre compte",
+    "Créez votre compte sur PAP.fr",
+    "Jinka - 2540 est votre code de connexion",
+    "Bienvenue sur SeLoger",
+    "Activation de votre espace",
+    "Vos identifiants de connexion",
+]:
+    affirmer(f"écarté — {sujet[:44]}", bool(SUJETS_IGNORES.search(sujet)))
+
+# Le mot « alerte » seul ne doit rien écarter : les portails l'emploient dans
+# leurs vrais envois. La dernière ligne est la forme qu'aura un envoi PAP.
+for sujet in [
+    '2 nouvelles annonces pour "Acheter un appartement dans la zone personnalisée"',
+    "3 nouvelles annonces dans votre zone personnalisée",
+    "Un bien exclusif de Agence SAP | 3 pièces, 58 m²",
+    "FREDēLION MONTMARTRE vous adresse ses dernières exclusivités",
+    "Nouvelle annonce correspondant à votre alerte PAP",
+]:
+    affirmer(f"traité — {sujet[:44]}", not SUJETS_IGNORES.search(sujet))
 
 print("\n" + "=" * 64)
 if echecs:

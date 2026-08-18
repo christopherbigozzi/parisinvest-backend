@@ -53,6 +53,25 @@ TYPES_BIEN = re.compile(
     r"\b(appartement|studio|duplex|loft|maison|villa|immeuble|local|terrain)\b", re.I
 )
 
+# Mails transactionnels à ignorer : confirmations de compte, mots de passe,
+# newsletters. Ils portent le bon expéditeur mais ne contiennent aucune annonce.
+SUJETS_IGNORES = re.compile(
+    r"(confirm|vérifi|verifi|bienvenue|welcome|mot de passe|password|"
+    r"code de connexion|votre compte|désinscri|desinscri|newsletter|"
+    r"a bien été créé|conditions générales|"
+    # Créations et modifications d'alerte : PAP a envoyé « Création de votre
+    # alerte e-mail » le 18/08/2026, qui a traversé le filtre et été consommé
+    # pour rien. On vise le vocabulaire de l'alerte elle-même, jamais le mot
+    # « alerte » seul — les portails l'emploient dans leurs vrais envois
+    # (« correspondent à votre alerte »).
+    r"cr[ée]ation de votre alerte|cr[ée]ez votre alerte|"
+    r"votre alerte (?:e-?mail|a bien|est) |enregistrement de votre alerte|"
+    r"modification de votre alerte|arr[êe]t de votre alerte|"
+    r"activation|inscription|identifiants)",
+    re.I,
+)
+
+
 # ─── SeLoger : découpage sans identifiant ────────────────────────────────────
 # Tous les liens d'un mail SeLoger passent par click.by.seloger.com avec un
 # jeton opaque : le corps ne contient aucun identifiant d'annonce, même encodé.

@@ -17,6 +17,9 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+# Le filtre des sujets transactionnels vit dans parsers.py : il ne dépend
+# de rien et devient ainsi testable sans les bibliothèques Google.
+from parsers import SUJETS_IGNORES
 from config import (
     GMAIL_CLIENT_ID,
     GMAIL_CLIENT_SECRET,
@@ -38,14 +41,6 @@ SOURCES = [
     ("pap",       re.compile(r"@(?:\w+\.)?pap\.fr",         re.I)),
 ]
 
-# Mails transactionnels à ignorer : confirmations de compte, mots de passe,
-# newsletters. Ils portent le bon expéditeur mais ne contiennent aucune annonce.
-SUJETS_IGNORES = re.compile(
-    r"(confirm|vérifi|verifi|bienvenue|welcome|mot de passe|password|"
-    r"code de connexion|votre compte|désinscri|desinscri|newsletter|"
-    r"a bien été créé|conditions générales)",
-    re.I,
-)
 
 
 class GmailIndisponible(RuntimeError):
