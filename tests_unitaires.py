@@ -17,6 +17,7 @@ from enricher import (extraire_dpe, extraire_etage, extraire_pieces,
                       _etage_depuis_json)
 from parsers import surface_vendable
 from zone_filter import est_dans_zone
+from scoring import calculer_marge, calculer_score
 
 echecs = []
 
@@ -273,6 +274,54 @@ verifier("sans mention Carrez, on ne touche à rien",
          surface_vendable("Appartement 3 pièces 58 m²", 58.0), 58.0)
 verifier("deux surfaces sans mention : on ne devine pas",
          surface_vendable("Appartement 58 m² avec cave de 6 m²", 58.0), 58.0)
+
+print("\n── Crible des quartiers exclus ──────────────────────────────────")
+# Le crible passe avant tout, quartier annoncé compris : une annonce étiquetée
+# « Montmartre » par SeLoger mais mentionnant Barbès doit sortir.
+for titre, adresse in [
+    ("Beau 2P proche Barbès-Rochechouart", "Montmartre, 75018 Paris 18e"),
+    ("Studio MARX DORMOY rénové", "Montmartre, 75018 Paris 18e"),
+    ("Appartement rue Marcadet", "Montmartre, 75018 Paris 18e"),
+    ("M° La Chapelle - 2 pièces", "75018 Paris 18e"),
+    ("3P Porte de Clignancourt", "75018 Paris 18e"),
+    ("Charmant bien Château Rouge", "75018 Paris 18e"),
+    ("Duplex rue du Poteau", "75018 Paris 18e"),
+    ("2P square Léon, à rafraîchir", "75018 Paris 18e"),
+    ("Bel appartement Guy Môquet", "75018 Paris 18e"),
+]:
+    verifier(f"rejeté — {titre[:44]}",
+             est_dans_zone({"titre": titre, "adresse": adresse}), False)
+
+# Les mots courants ne doivent pas déclencher le crible : une cave, une façade
+# blanche ou une forêt n'ont rien à voir avec la rue Cavé ou la rue Blanche.
+for titre, adresse in [
+    ("Appartement avec cave et box, Abbesses", "Montmartre, 75018 Paris 18e"),
+    ("Belle façade blanche, vue Sacré-Coeur", "Montmartre, 75018 Paris 18e"),
+    ("F2 au pied du Sacré-Cœur", "Montmartre, 75018 Paris 18e"),
+    ("PARIS 18 - Rue Muller, 2 pièces", "75018 Paris 18e"),
+]:
+    verifier(f"gardé — {titre[:44]}",
+             est_dans_zone({"titre": titre, "adresse": adresse}), True)
+
+print("\n── Score : marge à 50 points, ML retiré ─────────────────────────")
+# Les 25 points de préférences apprises valaient zéro faute de like enregistré,
+# ce qui plafonnait le score à 75 — la valeur même de SCORE_ALERTE. Leur poids
+# est reporté sur la marge.
+def _score_de(surface, prix, jours, titre="Appartement", dpe=""):
+    m = calculer_marge(surface, prix)
+    return calculer_score({"titre": titre, "description": "",
+                           "jours_en_ligne": jours, "marge_pct": m["marge_pct"],
+                           "prix_m2": m["prix_m2"], "prix_m2_ref": m["prix_m2_ref"],
+                           "dpe": dpe, "nb_baisses": 0})
+
+verifier("48 m² à 370 000 €, 3 jours, « à rénover »",
+         _score_de(48.0, 370000, 3, "Appartement 2 pièces de 48 m² à rénover"), 82)
+verifier("31 m² à 250 000 €, 3 jours", _score_de(31.0, 250000, 3), 71)
+verifier("57 m² à 480 000 €, publié le jour même", _score_de(57.0, 480000, 0), 63)
+affirmer("un score de 75 est désormais atteignable",
+         _score_de(48.0, 370000, 3, "Appartement 2 pièces de 48 m² à rénover") >= 75)
+affirmer("le score reste borné à 100",
+         _score_de(30.0, 100000, 0, "Plateau à rénover, dans son jus", "G") <= 100)
 
 print("\n" + "=" * 64)
 if echecs:

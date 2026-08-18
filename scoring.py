@@ -6,15 +6,24 @@ les annonces retenues, il n'entre pas dans le classement.
 
 Répartition du score, sur 100 :
     fraîcheur de l'annonce ....... 20
-    marge nette .................. 25
+    marge nette .................. 50
     décote vs prix de marché ..... 25
     potentiel travaux ............  5
-    préférences apprises (ML) .... 25
     bonus baisses de prix ........ +5, plafonné à 100
 
 Note : les deux composantes « décote vs DVF » et « prix/m² vs moyenne » de la
 version précédente mesuraient la même chose et pesaient 30 points à elles deux.
 Elles sont fusionnées ici en une seule composante de 25 points.
+
+Les 25 points de préférences apprises (ML) sont retirés : sans like ni dislike
+enregistré, ils valaient zéro pour toute annonce, ce qui plafonnait le score
+réel à 75 — exactement la valeur de SCORE_ALERTE, rendant l'alerte inatteignable.
+Leur poids est reporté sur la marge, qui passe de 25 à 50 points.
+
+Conséquence à connaître : marge et décote sont, à surface donnée, deux
+fonctions du prix au m². Elles pèsent désormais 75 points à elles deux, donc
+le classement suit très largement le prix au m². C'est assumé — mais si le
+classement paraît un jour trop monolithique, c'est ici qu'il faut regarder.
 """
 import re
 
@@ -111,10 +120,11 @@ def _points_fraicheur(jours):
 
 
 def _points_marge(marge_pct):
-    for seuil, pts in ((30, 25), (25, 21), (20, 17), (15, 12), (10, 7), (5, 3)):
+    """50 points : l'ancien barème sur 25, doublé, mêmes paliers."""
+    for seuil, pts in ((30, 50), (25, 42), (20, 34), (15, 24), (10, 14), (5, 6)):
         if marge_pct >= seuil:
             return pts
-    return 1 if marge_pct > 0 else 0
+    return 2 if marge_pct > 0 else 0
 
 
 def _points_decote(prix_m2, prix_ref):
@@ -152,6 +162,12 @@ def _points_baisses(nb):
 
 
 def calculer_score(annonce, zone="montmartre", score_ml=0):
+    """
+    `score_ml` est accepté mais ignoré : la composante de préférences apprises
+    est retirée du classement. Le paramètre reste dans la signature pour ne pas
+    casser l'appel de main.py, et pour pouvoir la réintroduire sans effort le
+    jour où assez de likes et dislikes auront été enregistrés.
+    """
     texte = " ".join(str(annonce.get(c) or "") for c in ("titre", "description"))
 
     score = (
@@ -162,7 +178,6 @@ def calculer_score(annonce, zone="montmartre", score_ml=0):
             float(annonce.get("prix_m2_ref") or parametres_zone(zone)[0]),
         )
         + _points_travaux(annonce.get("dpe"), texte)
-        + min(int(score_ml or 0), 25)
         + _points_baisses(int(annonce.get("nb_baisses") or 0))
     )
     return max(0, min(score, 100))

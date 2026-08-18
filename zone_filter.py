@@ -5,6 +5,20 @@ Filtre géographique Montmartre — double approche :
 3. Fallback : code postal 75018
 """
 import re
+import unicodedata
+
+
+def _aplatir(texte):
+    """
+    « Barbès-Rochechouart » → « barbes rochechouart ».
+
+    Accents retirés, ponctuation et tirets réduits à des espaces : un même lieu
+    s'écrit de dix façons dans les annonces, la comparaison doit être aveugle
+    à ces variantes.
+    """
+    texte = unicodedata.normalize("NFD", str(texte or "").lower())
+    texte = "".join(c for c in texte if unicodedata.category(c) != "Mn")
+    return " " + re.sub(r"[^a-z0-9]+", " ", texte).strip() + " "
 
 # ─── Polygone Montmartre (lat, lon) ───────────────────────────────────────────
 MONTMARTRE_POLYGON = [
@@ -48,26 +62,47 @@ RUES_BUTTE = {
     "place du tertre", "place dalida", "place charles dullin",
 }
 
-# Rues et lieux-dits du 18e — ou d'ailleurs — explicitement hors périmètre.
-# Un nom d'ici dans le titre suffit à écarter l'annonce.
+# Rues, squares et quartiers explicitement hors périmètre. Une seule de ces
+# mentions, où que ce soit dans le titre, l'adresse ou la description, suffit à
+# écarter l'annonce — c'est le tout premier contrôle, avant même le quartier
+# annoncé par le portail.
+#
+# Les termes sont comparés après passage par _aplatir : écrire « barbes »
+# couvre « Barbès », « BARBÈS » et « Barbès-Rochechouart ».
+#
+# Prudence sur les mots courants : « cave », « blanche », « forest », « poteau »
+# ou « ruisseau » se rencontrent dans n'importe quelle description de bien. Ils
+# figurent donc ici précédés de leur type de voie, jamais seuls.
 LIEUX_HORS_ZONE = {
-    # Est et nord-est : Clignancourt, Jules Joffrin, Goutte d'Or, La Chapelle
-    "clignancourt", "jules joffrin", "ramey", "custine", "hermel",
-    "ordener", "marcadet", "poissonniers", "simart", "duhesme",
-    "doudeauville", "myrrha", "cave", "christiani", "chartres",
-    "goutte d or", "goutte-d-or", "chateau rouge", "château rouge",
-    "richomme", "caille", "stephenson", "marx dormoy", "la chapelle",
-    "barbes", "barbès", "cloys",
-    # Nord : Porte de Clignancourt, Porte de Saint-Ouen, Simplon
-    "porte de clignancourt", "porte de saint ouen", "simplon",
-    "ornano", "belliard", "championnet", "poteau", "ruisseau",
-    "trezel", "amiraux",
-    # Ouest : Grandes-Carrières, Guy Môquet
-    "damremont", "damrémont", "joseph de maistre", "coysevox",
-    "leibniz", "forest", "guy moquet", "guy môquet", "la fourche",
-    # Sud : Pigalle, Blanche, Place de Clichy — bordure du 9e
-    "pigalle", "blanche", "place clichy", "place de clichy",
-    "rochechouart",
+    # ── La Chapelle et Marx Dormoy ───────────────────────────────────────────
+    "la chapelle", "porte de la chapelle", "marx dormoy", "pajol", "riquet",
+    "philippe de girard", "torcy", "cugnot", "evangile", "aubervilliers",
+    "departement", "tanger", "curial", "cesaria evora", "max dormoy",
+    # ── Barbès et la Goutte d'Or ─────────────────────────────────────────────
+    "barbes", "goutte d or", "chateau rouge", "poulet", "polonceau",
+    "myrha", "myrrha", "panama", "laghouat", "saint bruno", "affre",
+    "islettes", "charbonniere", "leon", "doudeauville", "richomme",
+    "stephenson", "caplat", "suez", "myrha", "boris vian", "gardes",
+    "rue de chartres", "rue cave", "rue de la charbonniere",
+    "square leon", "square saint bernard",
+    # ── Porte de Clignancourt, Simplon, Amiraux ──────────────────────────────
+    "porte de clignancourt", "porte des poissonniers", "porte de saint ouen",
+    "clignancourt", "simplon", "amiraux", "belliard", "championnet",
+    "vauvenargues", "jean dollfus", "binet", "camille flammarion",
+    "boulevard ney", "rue du poteau", "rue du ruisseau", "moskowa",
+    "square des amiraux",
+    # ── Jules Joffrin, Marcadet, Clignancourt bas ────────────────────────────
+    "jules joffrin", "marcadet", "poissonniers", "ramey", "custine",
+    "hermel", "ordener", "simart", "duhesme", "cloys", "christiani",
+    "trezel", "letort", "eugene sue", "montcalm", "emile duployé",
+    "square jules joffrin",
+    # ── Grandes-Carrières, Guy Môquet, La Fourche ────────────────────────────
+    "damremont", "joseph de maistre", "coysevox", "leibniz", "guy moquet",
+    "la fourche", "rue forest", "brochant", "la jonquiere", "epinettes",
+    "square des epinettes",
+    # ── Bordure sud : Pigalle, Blanche, Place de Clichy, Anvers-Rochechouart ─
+    "pigalle", "place blanche", "rue blanche", "place de clichy",
+    "place clichy", "rochechouart", "boulevard de clichy",
 }
 
 # Conservée sous son ancien nom : d'autres modules l'importent peut-être.
@@ -152,7 +187,7 @@ def rue_dans_zone(texte):
 
 
 def _normaliser(texte):
-    return re.sub(r"\s+", " ", (texte or "").lower()).strip()
+    return _aplatir(texte)
 
 
 def autre_arrondissement(texte):
@@ -171,9 +206,18 @@ def autre_arrondissement(texte):
 
 
 def lieu_hors_zone(texte):
-    """Un lieu-dit explicitement hors Butte apparaît-il dans le texte ?"""
-    plat = _normaliser(texte)
-    return any(lieu in plat for lieu in LIEUX_HORS_ZONE)
+    """Un lieu explicitement hors Butte apparaît-il dans le texte ?"""
+    plat = _aplatir(texte)
+    return any(f" {_aplatir(lieu).strip()} " in plat for lieu in LIEUX_HORS_ZONE)
+
+
+def motif_exclusion(texte):
+    """Renvoie le terme qui a fait rejeter l'annonce, pour pouvoir l'expliquer."""
+    plat = _aplatir(texte)
+    for lieu in sorted(LIEUX_HORS_ZONE, key=len, reverse=True):
+        if f" {_aplatir(lieu).strip()} " in plat:
+            return lieu
+    return ""
 
 
 def quartier_connu(adresse):
@@ -194,42 +238,45 @@ def quartier_connu(adresse):
 # ─── Fonction principale de filtrage ─────────────────────────────────────────
 def est_dans_zone(annonce):
     """
-    Triple vérification :
-    1. GPS ray-casting (le plus fiable)
-    2. Nom de rue dans la liste statique
-    3. Code postal 75018 (fallback)
+    Vérifications, dans l'ordre où elles s'appliquent :
+    1. Lieu explicitement exclu, n'importe où dans le texte — rejet sans appel
+    2. Autre arrondissement annoncé — rejet
+    3. GPS
+    4. Quartier nommé par le portail
+    5. Nom de rue
+    6. Code postal, en dernier recours
     """
-    # 1. GPS
-    lat = annonce.get("_lat")
-    lon = annonce.get("_lon")
-    if lat and lon:
-        try:
-            in_zone = point_in_polygon(float(lat), float(lon))
-            if not in_zone:
-                return False
-            return True
-        except Exception:
-            pass
-
     titre   = str(annonce.get("titre") or "")
     adresse = str(annonce.get("adresse") or "")
     description = str(annonce.get("description") or "")
     texte_complet = " ".join((titre, adresse, description))
 
-    # 2. Un autre arrondissement annoncé quelque part : rejet immédiat, même
-    #    si l'alerte range le bien en 75018.
+    # 1. Le crible passe avant tout le reste, y compris avant le quartier et le
+    #    GPS. Une annonce étiquetée « Montmartre » par SeLoger mais dont le
+    #    titre mentionne Barbès n'était plus contrôlée : le quartier tranchait
+    #    en premier et la laissait passer.
+    if lieu_hors_zone(texte_complet):
+        return False
+
+    # 2. Un autre arrondissement annoncé quelque part, même si l'alerte range
+    #    le bien en 75018.
     if autre_arrondissement(texte_complet):
         return False
 
-    # 3. Le quartier nommé par le portail prime sur tout le reste : c'est la
-    #    seule information de localisation qui soit à la fois précise et fiable.
+    # 3. GPS
+    lat = annonce.get("_lat")
+    lon = annonce.get("_lon")
+    if lat and lon:
+        try:
+            return point_in_polygon(float(lat), float(lon))
+        except Exception:
+            pass
+
+    # 4. Le quartier nommé par le portail : la localisation la plus fiable
+    #    dont on dispose ensuite.
     verdict = quartier_connu(adresse)
     if verdict is not None:
         return verdict
-
-    # 4. Un lieu-dit hors Butte dans le titre ou la description.
-    if lieu_hors_zone(texte_complet):
-        return False
 
     rue_ok = rue_dans_zone(texte_complet)
     if rue_ok is True:
