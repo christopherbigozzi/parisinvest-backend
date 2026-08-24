@@ -98,8 +98,46 @@ RE_SELOGER_CP = re.compile(r"\((\d{5})\)")
 # Le quartier occupe sa propre ligne et se termine par une virgule.
 RE_SELOGER_QUARTIER = re.compile(r"^\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9''\- ]{2,40}),\s*$", re.M)
 RE_SELOGER_PIECES_SURFACE = re.compile(
-    r"^\s*\d{1,2}\s*pi[èe]ces?\s*[.·]\s*[\d,.]+\s*m²\s*$", re.M
+    r"^\s*(\d{1,2})\s*pi[èe]ces?\s*[.·]\s*([\d,.]+)\s*m²\s*$", re.M
 )
+
+
+def _surface_pieces_seloger(bloc, prix, prix_m2_annonce):
+    """
+    Surface et pièces lues sur leur ligne dédiée, arbitrées par le prix au m².
+
+    Le bug du 19/08/2026 : la surface était prise par RE_SURFACE, qui rend la
+    *première* occurrence de « m² » du bloc. Or le titre précède la ligne
+    « 2 pièces . 37 m² » et contient souvent sa propre surface. Une annonce
+    intitulée « Appartement 2 pièces de 48 m² à rénover » mais mesurant 37 m²
+    ressortait donc à 48 m² : 7 708 €/m² au lieu de 10 000, et une marge de
+    +25,5 % au lieu de +0,5 %. L'affaire était fabriquée de toutes pièces.
+
+    Les annonces voisines étaient justes par accident : leur titre écrit
+    « 27m2 » avec un 2 ordinaire, que le motif ne reconnaît pas.
+
+    SeLoger annonce lui-même le prix au m² à côté du prix. Il donne donc une
+    surface indépendante, prix / prix_m2, qui sert d'arbitre : au-delà de 3 %
+    d'écart avec la ligne, c'est elle qu'on retient.
+    """
+    m = RE_SELOGER_PIECES_SURFACE.search(bloc)
+    pieces = int(_nombre(m.group(1))) if m else 0
+    surface_ligne = _nombre(m.group(2)) if m else 0.0
+
+    surface_deduite = 0.0
+    if prix > 0 and prix_m2_annonce > 0:
+        surface_deduite = prix / prix_m2_annonce
+
+    if surface_ligne > 0 and surface_deduite > 0:
+        ecart = abs(surface_ligne - surface_deduite) / surface_deduite
+        if ecart > 0.03:
+            print(f"  [Parse] Surface incohérente : {surface_ligne} m² annoncés "
+                  f"contre {surface_deduite:.1f} m² déduits du prix au m² — "
+                  f"on retient {surface_deduite:.1f}")
+            return round(surface_deduite, 2), pieces
+        return surface_ligne, pieces
+
+    return (surface_ligne or round(surface_deduite, 2)), pieces
 
 
 # « Surface au sol » contre surface Carrez : seule la seconde se vend. Les
@@ -108,6 +146,32 @@ RE_SELOGER_PIECES_SURFACE = re.compile(
 # 87 % de marge sur 45 m², plus rien sur 22.
 RE_MENTION_CARREZ = re.compile(r"\b(LC|carrez|loi\s*carrez|au\s*sol|utile)\b", re.I)
 RE_SURFACES_TITRE = re.compile(r"(\d{1,4}(?:[.,]\d{1,2})?)\s*m[²2]", re.I)
+
+
+# Rez-de-chaussée : écarté sans condition. Sur la Butte, un RDC cumule la
+# nuisance de rue, l'insécurité et une décote à la revente que le modèle de
+# marge ne sait pas chiffrer.
+RE_RDC = re.compile(
+    r"\b(rez[\s\-]?de[\s\-]?chauss[ée]{1,2}e?|r\.?d\.?c\.?|"
+    r"rez[\s\-]?de[\s\-]?jardin)\b",
+    re.I,
+)
+
+
+def est_rez_de_chaussee(annonce):
+    """
+    Le bien est-il en rez-de-chaussée ?
+
+    L'étage renseigné fait foi quand il existe — il vient de la fiche du
+    portail, pas d'une tournure de phrase. À défaut, on lit le texte : les
+    annonces SeLoger n'ont jamais d'étage, leur page étant inatteignable.
+    """
+    etage = str(annonce.get("etage") or "").strip().upper()
+    if etage:
+        return etage in ("RDC", "0", "0E", "RDJ")
+
+    texte = " ".join(str(annonce.get(c) or "") for c in ("titre", "description"))
+    return bool(RE_RDC.search(texte))
 
 
 def surface_vendable(titre, surface_annoncee):
@@ -349,17 +413,24 @@ def _photos_par_ident(texte, motif_photo):
 
 
 def parser_bloc(ident, bloc, source, config):
-    surface_match = RE_SURFACE.search(bloc)
-    surface = _nombre(surface_match.group(1)) if surface_match else 0.0
+    sans_identifiant = ident is None
     prix = _extraire_prix(bloc)
+
+    if sans_identifiant:
+        # Bloc SeLoger : la surface a sa ligne dédiée et le prix au m² annoncé
+        # sert d'arbitre. Ne jamais la chercher au fil du bloc — le titre la
+        # précède et ment parfois.
+        entete = RE_SELOGER_ENTETE.search(bloc)
+        prix_m2_annonce = _nombre(entete.group(2)) if entete else 0.0
+        surface, pieces = _surface_pieces_seloger(bloc, prix, prix_m2_annonce)
+    else:
+        surface_match = RE_SURFACE.search(bloc)
+        surface = _nombre(surface_match.group(1)) if surface_match else 0.0
+        pieces_match = RE_PIECES.search(bloc)
+        pieces = int(_nombre(pieces_match.group(1))) if pieces_match else 0
 
     if surface <= 0 or prix <= 0:
         return None
-
-    pieces_match = RE_PIECES.search(bloc)
-    pieces = int(_nombre(pieces_match.group(1))) if pieces_match else 0
-
-    sans_identifiant = ident is None
 
     adresse = ""
     if sans_identifiant:

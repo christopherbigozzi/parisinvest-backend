@@ -153,6 +153,92 @@ if len(sel) == 3:
     verifier("un nouvel envoi du même mail donne les mêmes identifiants",
              [a["ident"] for a in sel_bis], [a["ident"] for a in sel])
 
+print("\n── SeLoger — surface du titre contre surface réelle ─────────────")
+# Régression du 19/08/2026, signalée par l'utilisateur : une annonce ressortait
+# à 48 m² alors qu'elle en fait 37. La surface était prise par RE_SURFACE, qui
+# rend la première occurrence de « m² » du bloc — celle du titre, qui précède
+# la ligne « 2 pièces . 37 m² ». Conséquence : 7 708 €/m² au lieu de 10 000, et
+# une marge de +25,5 % au lieu de +0,5 %. L'affaire n'existait pas.
+#
+# Les annonces voisines étaient justes par accident : leur titre écrit « 27m2 »
+# avec un 2 ordinaire, que le motif ne reconnaît pas.
+
+BLOC_SELOGER_SURFACES = """2 nouvelles annonces dans votre zone personnalisée
+
+https://click.by.seloger.com/?qs=jeton01
+
+370 000 € 10 000 €/m²
+
+https://click.by.seloger.com/?qs=jeton02
+Appartement 2 pièces de 48 m² à rénover
+
+https://click.by.seloger.com/?qs=jeton03
+2 pièces . 37 m²
+
+https://click.by.seloger.com/?qs=jeton04
+
+ Paris 18ème arrondissement
+ (75018)
+
+https://click.by.seloger.com/?qs=jeton05
+Voir l'annonce
+
+https://click.by.seloger.com/?qs=jeton06
+
+295 000 € 10 926 €/m²
+
+https://click.by.seloger.com/?qs=jeton07
+Appartement 27m2 - Rue BERTHE 75018
+
+https://click.by.seloger.com/?qs=jeton08
+2 pièces . 27 m²
+
+https://click.by.seloger.com/?qs=jeton09
+
+ Montmartre,
+
+ Paris 18ème arrondissement
+ (75018)
+
+https://click.by.seloger.com/?qs=jeton10
+Voir l'annonce
+
+Changez facilement la fréquence d'envoi
+"""
+
+surf = parser_alerte({
+    "id": "regression-19-08", "source": "seloger",
+    "sujet": "2 nouvelles annonces dans votre zone personnalisée",
+    "expediteur": "annonces@alertes.seloger.com",
+    "date": datetime(2026, 8, 19, 9, 0, tzinfo=timezone.utc),
+    "html": "", "texte": BLOC_SELOGER_SURFACES,
+})
+
+verifier("deux annonces extraites", len(surf), 2)
+if len(surf) == 2:
+    verifier("la ligne dédiée l'emporte sur la surface du titre",
+             surf[0]["surface"], 37.0)
+    verifier("prix au m² conforme à celui annoncé",
+             round(surf[0]["prix"] / surf[0]["surface"]), 10000)
+    verifier("titre conservé tel quel, malgré sa surface fausse",
+             surf[0]["titre"], "Appartement 2 pièces de 48 m² à rénover")
+    verifier("l'annonce voisine reste juste", surf[1]["surface"], 27.0)
+    verifier("prix au m² de la voisine",
+             round(surf[1]["prix"] / surf[1]["surface"]), 10926)
+
+# Le prix au m² annoncé arbitre : si la ligne dédiée s'écarte de plus de 3 %,
+# c'est la surface déduite du prix au m² qui gagne.
+incoherent = BLOC_SELOGER_SURFACES.replace("2 pièces . 37 m²", "2 pièces . 74 m²")
+arbitre = parser_alerte({
+    "id": "arbitrage", "source": "seloger", "sujet": "arbitrage",
+    "expediteur": "annonces@alertes.seloger.com",
+    "date": datetime(2026, 8, 19, 9, 0, tzinfo=timezone.utc),
+    "html": "", "texte": incoherent,
+})
+if arbitre:
+    verifier("une ligne dédiée incohérente est corrigée par le prix au m²",
+             arbitre[0]["surface"], 37.0)
+
 print("\n── Choix du corps : texte vs HTML tracé ─────────────────────────")
 # Régression du 17/08/2026. Le parseur gardait le corps le plus long, donc
 # toujours le HTML — dont les liens passent par le traceur du portail, qui

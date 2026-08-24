@@ -26,11 +26,11 @@ import schedule
 
 from config import GMAIL_LABEL, SCORE_ALERTE, SURFACE_MIN, ZONES
 import gmail_client
-from parsers import parser_lot
-from zone_filter import est_dans_zone
+from parsers import parser_lot, est_rez_de_chaussee
+from zone_filter import est_dans_zone, localisation_verifiee
 from enricher import enrichir_lot
 from dedup import id_annonce, empreinte
-from scoring import calculer_marge, calculer_score
+from scoring import calculer_marge, calculer_score, detecter_travaux
 from ml_scorer import get_preference_vectors, calculer_score_ml
 from database import (
     sauvegarder_annonce,
@@ -86,6 +86,9 @@ def preparer(annonce):
 
     marge = calculer_marge(annonce.get("surface"), annonce.get("prix"), zone=ZONE)
     annonce.update(marge)
+
+    # Repère affiché au dashboard, calculé par la même règle que le score.
+    annonce["a_travaux"] = detecter_travaux(annonce)
     return annonce
 
 
@@ -108,10 +111,14 @@ def collecter():
     if not annonces:
         return [], ids_mails
 
-    retenues, hors_zone, trop_petites = [], 0, 0
+    retenues, hors_zone, trop_petites, rdc = [], 0, 0, 0
     for annonce in annonces:
         if float(annonce.get("surface") or 0) < SURFACE_MIN:
             trop_petites += 1
+            continue
+        # Rez-de-chaussée écarté sans condition, avant même la zone.
+        if est_rez_de_chaussee(annonce):
+            rdc += 1
             continue
         if not est_dans_zone(annonce):
             hors_zone += 1
@@ -119,7 +126,7 @@ def collecter():
         retenues.append(preparer(annonce))
 
     print(f"  [Filtre] {len(retenues)} retenue(s), {hors_zone} hors zone, "
-          f"{trop_petites} sous {SURFACE_MIN:.0f} m²")
+          f"{trop_petites} sous {SURFACE_MIN:.0f} m², {rdc} en rez-de-chaussée")
     return retenues, ids_mails
 
 
@@ -174,11 +181,12 @@ def run():
     # passés le 18/08/2026 : un « NOTRE DAME DE LORETTE », qui est dans le 9e,
     # et un « Village Ramey », hors Butte.
     avant = len(annonces)
-    annonces = [a for a in annonces if est_dans_zone(a)]
+    annonces = [a for a in annonces
+                if est_dans_zone(a) and not est_rez_de_chaussee(a)]
     ecartees = avant - len(annonces)
     if ecartees:
-        print(f"  [Filtre] {ecartees} annonce(s) écartée(s) après enrichissement, "
-              f"hors périmètre d'après leur description")
+        print(f"  [Filtre] {ecartees} annonce(s) écartée(s) après enrichissement — "
+              f"hors périmètre ou rez-de-chaussée révélé par la description")
     if not annonces:
         print("Aucune annonce dans le périmètre ce cycle.")
         gmail_client.marquer_lot_traite(ids_mails)
@@ -193,6 +201,13 @@ def run():
             annonce, vec_likes=vec_likes, vec_dislikes=vec_dislikes,
             nb_likes=nb_likes, nb_dislikes=nb_dislikes,
         )
+        # Recalculé ici et non dans preparer() : la description n'arrive
+        # qu'à l'enrichissement, et c'est souvent elle qui porte le
+        # vocabulaire des travaux.
+        annonce["a_travaux"] = detecter_travaux(annonce)
+        # Persisté pour que le dashboard applique la même pénalité que le
+        # worker sans embarquer les listes de rues en JavaScript.
+        annonce["localisation_verifiee"] = localisation_verifiee(annonce)
         annonce["score"] = calculer_score(annonce, zone=ZONE, score_ml=score_ml)
 
     nouvelles = mises_a_jour = 0

@@ -5,26 +5,30 @@ Marge AVANT FISCALITÉ. Le régime d'imposition se traite au cas par cas sur
 les annonces retenues, il n'entre pas dans le classement.
 
 Répartition du score, sur 100 :
-    fraîcheur de l'annonce ....... 20
-    marge nette .................. 50
-    décote vs prix de marché ..... 25
-    potentiel travaux ............  5
+    fraîcheur de l'annonce ....... 10
+    marge nette .................. 45
+    décote vs prix de marché ..... 30
+    potentiel travaux ............ 15
     bonus baisses de prix ........ +5, plafonné à 100
     localisation invérifiable .... −20
 
-Note : les deux composantes « décote vs DVF » et « prix/m² vs moyenne » de la
-version précédente mesuraient la même chose et pesaient 30 points à elles deux.
-Elles sont fusionnées ici en une seule composante de 25 points.
+Rééquilibrage du 19/08/2026, à la demande. Le prix au m² et le potentiel
+travaux montent, la fraîcheur descend de 20 à 10 : elle pesait autant que la
+moitié de la marge, ce qui a du sens en location où tout se joue en heures,
+beaucoup moins en achat-revente où une annonce de quatre jours reste une
+bonne affaire. La marge cède 5 points au profit de la décote.
 
-Les 25 points de préférences apprises (ML) sont retirés : sans like ni dislike
-enregistré, ils valaient zéro pour toute annonce, ce qui plafonnait le score
-réel à 75 — exactement la valeur de SCORE_ALERTE, rendant l'alerte inatteignable.
-Leur poids est reporté sur la marge, qui passe de 25 à 50 points.
+Les composantes « décote vs DVF » et « prix/m² vs moyenne » d'une version
+antérieure mesuraient la même chose ; elles sont fusionnées en une seule.
+
+Les préférences apprises (ML) ont été retirées : sans like ni dislike
+enregistré, elles valaient zéro pour toute annonce, ce qui plafonnait le score
+réel à 75 — exactement la valeur de SCORE_ALERTE, rendant l'alerte
+inatteignable.
 
 Conséquence à connaître : marge et décote sont, à surface donnée, deux
-fonctions du prix au m². Elles pèsent désormais 75 points à elles deux, donc
-le classement suit très largement le prix au m². C'est assumé — mais si le
-classement paraît un jour trop monolithique, c'est ici qu'il faut regarder.
+fonctions du prix au m². Elles pèsent 75 points à elles deux, donc le
+classement suit très largement le prix au m². C'est assumé et voulu.
 """
 import os
 import re
@@ -56,6 +60,45 @@ MOTS_REFAIT = re.compile(
     r"standing|neuf|livré|livre neuf)\b",
     re.I,
 )
+
+
+def texte_annonce(annonce):
+    """Titre et description réunis, seule matière disponible pour les mots-clés."""
+    return " ".join(str(annonce.get(c) or "") for c in ("titre", "description"))
+
+
+def detecter_travaux(annonce):
+    """
+    Le bien est-il à retravailler ? Vrai quand le DPE est mauvais (F ou G) ou
+    quand le vocabulaire de l'annonce le dit.
+
+    Sert deux usages d'un même verdict : la composante de score, et le repère
+    affiché au dashboard. Une seule règle, un seul endroit.
+    """
+    dpe = str(annonce.get("dpe") or "").upper().strip()[:1]
+    if dpe in ("F", "G"):
+        return True
+    if dpe in ("A", "B"):
+        return False
+
+    texte = texte_annonce(annonce)
+    if MOTS_REFAIT.search(texte):
+        return False
+    return bool(MOTS_TRAVAUX.search(texte))
+
+
+def mots_travaux_trouves(annonce):
+    """Les termes qui ont déclenché le repère, pour pouvoir l'expliquer."""
+    texte = texte_annonce(annonce)
+    if MOTS_REFAIT.search(texte):
+        return []
+    vus, ordre = set(), []
+    for m in MOTS_TRAVAUX.finditer(texte):
+        mot = m.group(1).lower()
+        if mot not in vus:
+            vus.add(mot)
+            ordre.append(mot)
+    return ordre[:4]
 
 
 def parametres_zone(zone="montmartre"):
@@ -116,15 +159,17 @@ def _marge_vide():
 
 
 def _points_fraicheur(jours):
-    for seuil, pts in ((0, 20), (1, 18), (3, 14), (7, 9), (14, 5), (30, 2)):
+    """10 points. En achat-revente, quatre jours d'ancienneté ne disqualifient
+    pas une affaire — ce critère ne doit pas écraser le prix au m²."""
+    for seuil, pts in ((0, 10), (1, 9), (3, 7), (7, 5), (14, 3), (30, 1)):
         if jours <= seuil:
             return pts
     return 0
 
 
 def _points_marge(marge_pct):
-    """50 points : l'ancien barème sur 25, doublé, mêmes paliers."""
-    for seuil, pts in ((30, 50), (25, 42), (20, 34), (15, 24), (10, 14), (5, 6)):
+    """45 points, mêmes paliers."""
+    for seuil, pts in ((30, 45), (25, 38), (20, 31), (15, 22), (10, 13), (5, 5)):
         if marge_pct >= seuil:
             return pts
     return 2 if marge_pct > 0 else 0
@@ -134,19 +179,23 @@ def _points_decote(prix_m2, prix_ref):
     if not (prix_m2 > 0 and prix_ref > 0):
         return 0
     decote = (prix_ref - prix_m2) / prix_ref
-    for seuil, pts in ((0.25, 25), (0.20, 21), (0.15, 17), (0.10, 12), (0.05, 6)):
+    for seuil, pts in ((0.25, 30), (0.20, 25), (0.15, 20), (0.10, 14), (0.05, 7)):
         if decote >= seuil:
             return pts
-    return 2 if decote >= 0 else 0
+    return 3 if decote >= 0 else 0
 
 
 def _points_travaux(dpe, texte):
     """
-    5 points au maximum. Le DPE reste le signal principal quand il est
-    disponible ; à défaut, on lit le vocabulaire de l'annonce.
+    15 points au maximum. C'est sur le bien à retravailler que se fait la
+    marge : ce critère pèse désormais autant qu'un tiers de la décote.
+
+    Le DPE reste le signal le plus fiable quand il existe. À défaut — et
+    c'est le cas de toutes les annonces SeLoger, dont la page est
+    inatteignable — on lit le vocabulaire du titre et de la description.
     """
     dpe = str(dpe or "").upper().strip()[:1]
-    pts_dpe = {"G": 5, "F": 4, "E": 3, "D": 2, "C": 1}.get(dpe)
+    pts_dpe = {"G": 15, "F": 12, "E": 9, "D": 6, "C": 3}.get(dpe)
     if pts_dpe is not None:
         return pts_dpe
     if dpe in ("A", "B"):
@@ -156,8 +205,8 @@ def _points_travaux(dpe, texte):
     if MOTS_REFAIT.search(texte):
         return 0
     if MOTS_TRAVAUX.search(texte):
-        return 5
-    return 2  # information absente : note neutre, ni prime ni pénalité
+        return 15
+    return 6  # information absente : note neutre, ni prime ni pénalité
 
 
 def _points_baisses(nb):

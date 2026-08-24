@@ -19,7 +19,7 @@ COLONNES = {
     "pieces", "etage", "prix", "prix_m2", "prix_m2_ref", "dpe", "source", "url",
     "photo", "date_publi", "jours_en_ligne", "nb_baisses", "zone", "score",
     "marge_nette", "marge_pct", "travaux", "notaire", "portage", "frais_revente",
-    "prix_revente", "cout_total", "actif", "gmail_id",
+    "prix_revente", "cout_total", "actif", "gmail_id", "a_travaux", "localisation_verifiee",
 }
 
 

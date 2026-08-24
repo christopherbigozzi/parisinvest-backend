@@ -15,7 +15,8 @@ from scoring import calculer_marge, calculer_score, _points_travaux
 from enricher import (extraire_dpe, extraire_etage, extraire_pieces,
                       page_atteignable, appliquer_donnees_bienici,
                       _etage_depuis_json)
-from parsers import surface_vendable, SUJETS_IGNORES
+from parsers import surface_vendable, SUJETS_IGNORES, est_rez_de_chaussee
+from scoring import detecter_travaux, mots_travaux_trouves
 from zone_filter import est_dans_zone, localisation_verifiee
 
 echecs = []
@@ -156,13 +157,13 @@ affirmer("le score reste borné à 100",
 affirmer("une annonce vide ne fait pas planter", 0 <= calculer_score({}) <= 100)
 
 print("\n── Potentiel travaux ────────────────────────────────────────────")
-verifier("DPE G prime au maximum", _points_travaux("G", ""), 5)
+verifier("DPE G prime au maximum", _points_travaux("G", ""), 15)
 verifier("DPE B ne rapporte rien", _points_travaux("B", ""), 0)
 verifier("sans DPE, le vocabulaire travaux prime",
-         _points_travaux("", "Appartement à rénover entièrement"), 5)
+         _points_travaux("", "Appartement à rénover entièrement"), 15)
 verifier("sans DPE, un bien refait à neuf ne rapporte rien",
          _points_travaux("", "Superbe bien refait à neuf"), 0)
-verifier("sans information, note neutre", _points_travaux("", "Bel appartement"), 2)
+verifier("sans information, note neutre", _points_travaux("", "Bel appartement"), 6)
 
 print("\n── Extraction depuis la page de l'annonce ───────────────────────")
 verifier("DPE lu dans le texte",
@@ -315,9 +316,9 @@ def _score_de(surface, prix, jours, titre="Appartement", dpe="",
                            "dpe": dpe, "nb_baisses": 0})
 
 verifier("48 m² à 370 000 €, 3 jours, « à rénover »",
-         _score_de(48.0, 370000, 3, "Appartement 2 pièces de 48 m² à rénover"), 82)
-verifier("31 m² à 250 000 €, 3 jours", _score_de(31.0, 250000, 3), 71)
-verifier("57 m² à 480 000 €, publié le jour même", _score_de(57.0, 480000, 0), 63)
+         _score_de(48.0, 370000, 3, "Appartement 2 pièces de 48 m² à rénover"), 85)
+verifier("31 m² à 250 000 €, 3 jours", _score_de(31.0, 250000, 3), 69)
+verifier("57 m² à 480 000 €, publié le jour même", _score_de(57.0, 480000, 0), 58)
 affirmer("un score de 75 est désormais atteignable",
          _score_de(48.0, 370000, 3, "Appartement 2 pièces de 48 m² à rénover") >= 75)
 affirmer("le score reste borné à 100",
@@ -374,6 +375,43 @@ for sujet in [
     "Nouvelle annonce correspondant à votre alerte PAP",
 ]:
     affirmer(f"traité — {sujet[:44]}", not SUJETS_IGNORES.search(sujet))
+
+print("\n── Rez-de-chaussée : écarté sans condition ──────────────────────")
+# L'étage renseigné fait foi quand il existe : il vient de la fiche du portail,
+# pas d'une tournure de phrase. Les annonces SeLoger n'en ont jamais, leur page
+# étant inatteignable — on lit alors le texte.
+verifier("étage RDC de la fiche Bien'ici",
+         est_rez_de_chaussee({"etage": "RDC"}), True)
+verifier("étage 4e de la fiche : ce n'est pas un RDC",
+         est_rez_de_chaussee({"etage": "4e", "titre": "Vue sur le rez-de-chaussée"}), False)
+verifier("« rez-de-chaussée » dans le titre, sans étage connu",
+         est_rez_de_chaussee({"titre": "Beau 2P en rez-de-chaussée sur cour"}), True)
+verifier("abréviation RDC",
+         est_rez_de_chaussee({"titre": "Studio RDC rénové"}), True)
+verifier("rez-de-jardin compte aussi",
+         est_rez_de_chaussee({"description": "Charmant rez-de-jardin"}), True)
+verifier("un 3e étage n'est pas un RDC",
+         est_rez_de_chaussee({"titre": "3e étage avec ascenseur"}), False)
+verifier("annonce muette : pas de RDC supposé",
+         est_rez_de_chaussee({"titre": "Appartement 2 pièces 34 m²"}), False)
+
+print("\n── Repère « à retravailler » ────────────────────────────────────")
+# Même verdict pour le score et pour l'étiquette du dashboard : une seule règle,
+# un seul endroit.
+verifier("DPE G suffit", detecter_travaux({"dpe": "G", "titre": "Appartement"}), True)
+verifier("DPE F suffit", detecter_travaux({"dpe": "F", "titre": "Appartement"}), True)
+verifier("DPE A l'exclut malgré le vocabulaire",
+         detecter_travaux({"dpe": "A", "titre": "À rénover entièrement"}), False)
+verifier("vocabulaire du titre, sans DPE",
+         detecter_travaux({"titre": "Dernier étage à rénover, beau potentiel"}), True)
+verifier("vocabulaire de la description",
+         detecter_travaux({"titre": "Appartement 3 pièces",
+                           "description": "Bien dans son jus, à moderniser"}), True)
+verifier("un bien refait à neuf n'est pas à retravailler",
+         detecter_travaux({"titre": "Superbe 2P refait à neuf, beau potentiel"}), False)
+verifier("annonce neutre", detecter_travaux({"titre": "Appartement 2 pièces 34 m²"}), False)
+affirmer("les termes déclencheurs sont restituables",
+         "à rénover" in mots_travaux_trouves({"titre": "Dernier étage à rénover"}))
 
 print("\n" + "=" * 64)
 if echecs:
