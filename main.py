@@ -27,7 +27,7 @@ import schedule
 from config import GMAIL_LABEL, SCORE_ALERTE, SURFACE_MIN, ZONES
 import gmail_client
 from parsers import parser_lot, est_rez_de_chaussee
-from zone_filter import est_dans_zone, localisation_verifiee
+from zone_filter import est_dans_zone, localisation_verifiee, repere_butte
 from enricher import enrichir_lot
 from dedup import id_annonce, empreinte
 from scoring import calculer_marge, calculer_score, detecter_travaux
@@ -207,7 +207,8 @@ def run():
         annonce["a_travaux"] = detecter_travaux(annonce)
         # Persisté pour que le dashboard applique la même pénalité que le
         # worker sans embarquer les listes de rues en JavaScript.
-        annonce["localisation_verifiee"] = localisation_verifiee(annonce)
+        annonce["repere_butte"] = repere_butte(annonce)
+        annonce["localisation_verifiee"] = bool(annonce["repere_butte"])
         annonce["score"] = calculer_score(annonce, zone=ZONE, score_ml=score_ml)
 
     nouvelles = mises_a_jour = 0

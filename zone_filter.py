@@ -47,22 +47,69 @@ MONTMARTRE_POLYGON = [
 # terrain, elles priment sur tout le reste.
 
 RUES_BUTTE = {
-    # Versants et sommet
-    "abbesses", "lepic", "ravignan", "berthe", "tholeze", "tholozé",
-    "trois freres", "trois-freres", "durantin", "veron", "gabrielle",
-    "garreau", "norvins", "saules", "cortot", "girardon", "junot",
-    "poulbot", "abreuvoir", "mont cenis", "chevalier de la barre",
-    "muller", "tertre", "sacre coeur", "sacré-coeur", "paul albert",
-    "andre barsacq", "drevet", "dalida", "villa leandre", "cite nollez",
-    "burq", "aristide bruant", "yvonne le tac", "la vieuville", "orsel",
-    "germain pilon", "coustou", "piemontesi", "andre antoine", "feutrier",
-    "nicolet", "seveste", "livingstone", "antoinette", "veron",
-    # Flancs nord et ouest
-    "caulaincourt", "lamarck", "francoeur", "saint vincent",
-    # Pied sud, côté Anvers et Sacré-Cœur
-    "steinkerque", "tardieu", "ronsard", "chappe", "houdon",
-    "constance", "puget", "charles nodier", "anvers",
-    "place du tertre", "place dalida", "place charles dullin",
+    # ── Sommet, place du Tertre, Saint-Pierre ────────────────────────────────
+    "norvins", "mont cenis", "saint rustique", "poulbot", "tertre",
+    "place du tertre", "chevalier de la barre", "azais", "saint eleuthere",
+    "place du calvaire", "cardinal dubois", "cardinal guibert",
+    "de la bonne", "lucien gaulard", "maurice utrillo", "becquerel",
+    # ── Versant nord : vignes, Saint-Vincent, Junot ──────────────────────────
+    "saules", "cortot", "abreuvoir", "saint vincent", "lamarck",
+    "caulaincourt", "junot", "avenue junot", "villa leandre",
+    "simon dereure", "girardon", "francoeur", "dalida", "place dalida",
+    "marcel ayme", "place marcel ayme", "brouillards",
+    "allee des brouillards", "chateau des brouillards", "gaston coute",
+    "cite nollez", "paul feval",
+    # ── Abbesses, Lepic, Ravignan ────────────────────────────────────────────
+    "abbesses", "place des abbesses", "lepic", "tholeze", "tholozé",
+    "ravignan", "emile goudeau", "place emile goudeau", "berthe",
+    "durantin", "veron", "gabrielle", "garreau", "burq", "aristide bruant",
+    "trois freres", "trois-freres", "yvonne le tac", "la vieuville",
+    "drevet", "piemontesi", "andre antoine", "germain pilon", "houdon",
+    "constance", "coustou", "puget", "cauchois", "audran", "orchampt",
+    "armee d orient", "jean baptiste clement", "place jean baptiste clement",
+    "antoinette", "nicolet",
+    # ── Pied sud : Anvers, Saint-Pierre, Dullin ──────────────────────────────
+    "steinkerque", "tardieu", "ronsard", "chappe", "seveste", "livingstone",
+    "andre barsacq", "orsel", "dancourt", "place charles dullin",
+    "charles nodier", "andre del sarte", "muller", "feutrier", "paul albert",
+    "foyatier", "place saint pierre", "square louise michel",
+    "square willette", "anvers",
+    # ── Flanc est, conservé à la demande du 07/09/2026 ───────────────────────
+    "custine",
+    # ── Repère bâti ──────────────────────────────────────────────────────────
+    "sacre coeur", "sacré-coeur",
+}
+
+# ─── Repères non-viaires de la Butte ─────────────────────────────────────────
+# Stations de métro, monuments et appellations courantes. Une annonce qui cite
+# l'un d'eux se situe elle-même sans donner de rue — c'est fréquent : les
+# agences vendent « à deux pas du Sacré-Cœur » plus volontiers qu'une adresse.
+#
+# Écartés volontairement : « Blanche », « Pigalle » et le Moulin Rouge, qui
+# sont sur le boulevard de Clichy — donc déjà en liste noire, les y opposer
+# créerait une contradiction. « Jules Joffrin », « Château Rouge » et
+# « Marcadet-Poissonniers » desservent la Butte mais depuis des quartiers
+# qu'on ne vise pas.
+REPERES_BUTTE = {
+    # Métro et funiculaire
+    "abbesses", "anvers", "lamarck caulaincourt", "lamarck-caulaincourt",
+    "funiculaire", "funiculaire de montmartre",
+    # Ajoutés le 07/09/2026 à la demande : ces trois stations bordent la Butte
+    # et étaient jusque-là en liste noire. Pigalle et la place de Clichy
+    # tiennent le pied sud-ouest, Jules Joffrin le flanc est.
+    "pigalle", "place de clichy", "place clichy", "jules joffrin",
+    "mairie du 18e", "square jules joffrin",
+    # Appellations
+    "montmartre", "butte montmartre", "la butte", "butte sacree",
+    "vieux montmartre", "haut de la butte", "sommet de la butte",
+    # Monuments et lieux-dits
+    "sacre coeur", "basilique du sacre coeur", "place du tertre",
+    "moulin de la galette", "bateau lavoir", "lapin agile",
+    "mur des je t aime", "square jehan rictus", "halle saint pierre",
+    "saint pierre de montmartre", "musee de montmartre", "maison rose",
+    "clos montmartre", "vignes de montmartre", "passe muraille",
+    "cimetiere de montmartre", "square louise michel", "square willette",
+    "place dalida", "chateau des brouillards",
 }
 
 # Rues, squares et quartiers explicitement hors périmètre. Une seule de ces
@@ -95,17 +142,24 @@ LIEUX_HORS_ZONE = {
     "boulevard ney", "rue du poteau", "rue du ruisseau", "moskowa",
     "square des amiraux",
     # ── Jules Joffrin, Marcadet, Clignancourt bas ────────────────────────────
-    "jules joffrin", "marcadet", "poissonniers", "ramey", "custine",
+    # « jules joffrin » et « custine » sont sortis d'ici le 07/09/2026 à la
+    # demande : la mairie du 18e et la rue Custine bordent le flanc est de la
+    # Butte et Christopher veut ces annonces. Ils sont passés en liste
+    # blanche. Attention : sur SeLoger, Jules Joffrin est vendu sous le
+    # libellé de quartier « Clignancourt-Jules Joffrin », qui reste écarté
+    # par « clignancourt ».
+    "marcadet", "poissonniers", "ramey",
     "hermel", "ordener", "simart", "duhesme", "cloys", "christiani",
     "trezel", "letort", "eugene sue", "montcalm", "emile duployé",
-    "square jules joffrin",
     # ── Grandes-Carrières, Guy Môquet, La Fourche ────────────────────────────
     "damremont", "joseph de maistre", "coysevox", "leibniz", "guy moquet",
     "la fourche", "rue forest", "brochant", "la jonquiere", "epinettes",
     "square des epinettes",
     # ── Bordure sud : Pigalle, Blanche, Place de Clichy, Anvers-Rochechouart ─
-    "pigalle", "place blanche", "rue blanche", "place de clichy",
-    "place clichy", "rochechouart", "boulevard de clichy",
+    # « pigalle » est sorti d'ici le 07/09/2026 à la demande, et passé en
+    # liste blanche. « place blanche » et « rue blanche » restent exclues —
+    # dis-le si tu veux les récupérer aussi, elles sont à 300 m.
+    "place blanche", "rue blanche", "rochechouart",
     # ── Arrondissements limitrophes, repères cités dans les descriptions ─────
     # Les agences vendent un quartier voisin en nommant son métro ou son
     # église. « NOTRE DAME DE LORETTE » ouvrait une annonce du 9e classée
@@ -133,10 +187,12 @@ LIEUX_HORS_ZONE = {
     "porte de paris",
 
     # ── Clichy (92110), Levallois ────────────────────────────────────────────
-    # « clichy » seul couvre aussi l'avenue, le boulevard et la place de
-    # Clichy : aucune voie de la Butte ne porte ce nom, le raccourci est sûr.
-    "clichy", "mairie de clichy", "levallois", "anatole france",
-    "porte de clichy", "berthier",
+    # « clichy » seul avait été ajouté le 07/09/2026 puis retiré le jour même :
+    # la place de Clichy borde le pied ouest de la Butte (bas de Lepic,
+    # Caulaincourt) et ces annonces sont à garder. Ne restent exclues que la
+    # commune elle-même et les voies qui s'en éloignent vers les Épinettes.
+    "mairie de clichy", "avenue de clichy", "porte de clichy",
+    "levallois", "anatole france", "berthier",
 
     # ── Aubervilliers, Pantin, La Villette ───────────────────────────────────
     "quatre chemins", "front populaire", "fort d aubervilliers",
@@ -315,13 +371,34 @@ def localisation_verifiee(annonce):
     if quartier_connu(str(annonce.get("adresse") or "")) is not None:
         return True
 
+    return bool(repere_butte(annonce))
+
+
+def repere_butte(annonce):
+    """
+    Le repère de la Butte cité par l'annonce, ou "" s'il n'y en a aucun.
+
+    Renvoie le terme lui-même et non un booléen : le dashboard l'affiche tel
+    quel, ce qui permet de lire d'un coup d'œil *pourquoi* la localisation est
+    tenue pour sûre — « rue Lepic » n'inspire pas la même confiance qu'un
+    « Montmartre » lâché dans une description commerciale.
+
+    Le terme le plus long l'emporte, pour préférer « lamarck caulaincourt »
+    à « lamarck » et « place du tertre » à « tertre ».
+    """
     texte = " ".join(str(annonce.get(c) or "")
                      for c in ("titre", "adresse", "description"))
+    # Un lieu de la liste noire annule tout : « Montmartre » figure dans
+    # « boulevard Barbès, au pied de Montmartre », qui n'est pas sur la Butte.
+    if lieu_hors_zone(texte):
+        return ""
+
     plat = _aplatir(texte)
-    # Une rue de la Butte, ou le nom du quartier lui-même : les agences
-    # écrivent souvent « MONTMARTRE » en tête de description.
-    reperes = set(RUES_BUTTE) | set(QUARTIERS_ZONE)
-    return any(f" {_aplatir(repere).strip()} " in plat for repere in reperes)
+    candidats = set(RUES_BUTTE) | set(QUARTIERS_ZONE) | set(REPERES_BUTTE)
+    for repere in sorted(candidats, key=len, reverse=True):
+        if f" {_aplatir(repere).strip()} " in plat:
+            return repere
+    return ""
 
 
 def quartier_connu(adresse):
