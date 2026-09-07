@@ -10,7 +10,6 @@ Répartition du score, sur 100 :
     décote vs prix de marché ..... 30
     potentiel travaux ............ 15
     bonus baisses de prix ........ +5, plafonné à 100
-    localisation invérifiable .... −20
 
 Rééquilibrage du 19/08/2026, à la demande. Le prix au m² et le potentiel
 travaux montent, la fraîcheur descend de 20 à 10 : elle pesait autant que la
@@ -213,18 +212,23 @@ def _points_baisses(nb):
     return {0: 0, 1: 1, 2: 3}.get(nb, 5)
 
 
-# Pénalité appliquée quand rien, dans l'annonce, ne permet de situer le bien
-# autrement que par « 75018 ». Le 18e va de la Butte à la Porte de la Chapelle :
-# un bien invérifiable peut être n'importe où, et ce sont justement les
-# quartiers bon marché qui affichent les plus fortes marges. Sans cette
-# pénalité, le haut du classement leur revenait mécaniquement.
+# La pénalité de −20 pour localisation invérifiable a été retirée le
+# 07/09/2026. Elle empêchait ces annonces de monopoliser le haut du classement,
+# ce qui était nécessaire tant que tout se lisait dans une seule liste — mais
+# elle mélangeait deux questions distinctes : la qualité de l'affaire, et notre
+# certitude sur son emplacement. Un bien réellement excellent mais muet sur son
+# adresse affichait 48 au lieu de 68, et disparaissait au lieu d'être signalé.
 #
-# Le choix est de rétrograder plutôt que d'exclure : quelques-unes de ces
-# annonces sont réellement sur la Butte, elles restent donc consultables.
-PENALITE_LOCALISATION = float(os.getenv("PENALITE_LOCALISATION", "20"))
+# Le dashboard sépare désormais les deux en onglets : « localisation vérifiée »
+# par défaut, « à vérifier » à côté. L'onglet porte l'incertitude, le score ne
+# mesure plus que l'affaire. On garde la valeur à 0 plutôt que de supprimer la
+# variable, pour pouvoir la rétablir sans toucher au reste.
+PENALITE_LOCALISATION = float(os.getenv("PENALITE_LOCALISATION", "0"))
 
 
 def _penalite_localisation(annonce):
+    if not PENALITE_LOCALISATION:
+        return 0
     return 0 if localisation_verifiee(annonce) else PENALITE_LOCALISATION
 
 

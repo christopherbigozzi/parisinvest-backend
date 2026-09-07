@@ -133,7 +133,12 @@ def collecter():
 def alerter(annonces_sauvegardees):
     """Notifie les nouvelles opportunités, une seule fois chacune."""
     top = get_top_annonces(zone=ZONE, limite=15)
-    candidates = [a for a in top if (a.get("score") or 0) >= SCORE_ALERTE]
+    # Une alerte pousse à décrocher son téléphone : elle n'a de sens que sur un
+    # bien dont on sait où il est. Les annonces sans repère restent visibles au
+    # dashboard, dans leur onglet, mais ne réveillent personne.
+    candidates = [a for a in top
+                  if (a.get("score") or 0) >= SCORE_ALERTE
+                  and str(a.get("repere_butte") or "").strip()]
     if not candidates:
         return 0
 

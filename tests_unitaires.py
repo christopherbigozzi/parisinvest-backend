@@ -17,7 +17,7 @@ from enricher import (extraire_dpe, extraire_etage, extraire_pieces,
                       _etage_depuis_json)
 from parsers import surface_vendable, SUJETS_IGNORES, est_rez_de_chaussee
 from scoring import detecter_travaux, mots_travaux_trouves
-from zone_filter import est_dans_zone, localisation_verifiee
+from zone_filter import est_dans_zone, localisation_verifiee, repere_butte
 
 echecs = []
 
@@ -342,12 +342,23 @@ verifier("seulement « 75018 » : invérifiable",
          localisation_verifiee({"titre": "Appartement 2 pièces de 48 m² à rénover",
                                 "adresse": "75018 Paris 18e"}), False)
 
+# La pénalité de −20 est retirée depuis le 07/09/2026 : le score ne mesure plus
+# que la qualité de l'affaire, et c'est l'onglet du dashboard qui porte
+# l'incertitude sur l'emplacement. Deux annonces identiques, dont l'une seule
+# est situable, doivent donc obtenir exactement la même note.
 sans_lieu = _score_de(48.0, 370000, 3, "Appartement 2 pièces de 48 m² à rénover",
                       adresse="75018 Paris 18e")
 avec_lieu = _score_de(48.0, 370000, 3, "Appartement 2 pièces de 48 m² à rénover")
-verifier("la pénalité vaut bien 20 points", avec_lieu - sans_lieu, 20)
-affirmer("une annonce sans localisation ne franchit plus le seuil d'alerte",
-         sans_lieu < 75)
+verifier("le score ne dépend plus de la localisation", sans_lieu, avec_lieu)
+
+# Le tri se fait ailleurs : le repère existe, ou il n'existe pas.
+affirmer("l'annonce sans repère est bien reconnue comme telle",
+         repere_butte({"titre": "Appartement 2 pièces de 48 m² à rénover",
+                       "adresse": "75018 Paris 18e", "description": ""}) == "")
+affirmer("celle qui cite Montmartre porte son repère",
+         repere_butte({"titre": "Appartement 2 pièces de 48 m² à rénover",
+                       "adresse": "Montmartre, 75018 Paris 18e",
+                       "description": ""}) == "montmartre")
 
 print("\n── Mails transactionnels écartés avant parsing ──────────────────")
 # Un mail consommé sans résultat est perdu : il repart avec le libellé
