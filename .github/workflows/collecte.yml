@@ -1,5 +1,5 @@
 name: Collecte ParisInvest
-
+ 
 on:
   schedule:
     # Toutes les 30 minutes. GitHub déclenche souvent avec plusieurs minutes
@@ -7,29 +7,29 @@ on:
     # conserve les alertes jusqu'au passage suivant.
     - cron: "*/30 * * * *"
   workflow_dispatch:      # bouton « Run workflow » pour déclencher à la main
-
+ 
 # Deux cycles simultanés écriraient les mêmes lignes en base : on annule
 # le déclenchement en cours plutôt que de les laisser se marcher dessus.
 concurrency:
   group: collecte
   cancel-in-progress: false
-
+ 
 jobs:
   collecte:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
+ 
     steps:
       - uses: actions/checkout@v4
-
+ 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-
+ 
       - name: Installer les dépendances
         run: pip install -r requirements.txt
-
+ 
       - name: Lancer un cycle
         env:
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
@@ -40,9 +40,15 @@ jobs:
           GMAIL_LABEL:          parisinvest
           TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Relais de pages hébergé sur Vercel, pour les portails qui
+          # refusent les plages d'IP des runners GitHub — PAP au premier chef.
+          # Sans ces deux valeurs, l'enrichissement se comporte comme avant.
+          PAGE_PROXY_URL:       ${{ secrets.PAGE_PROXY_URL }}
+          PAGE_PROXY_CLE:       ${{ secrets.PAGE_PROXY_CLE }}
           # Les runners GitHub partagent des plages d'IP que SeLoger et
           # Leboncoin bloquent volontiers. On enrichit moins d'annonces par
           # passage pour rester discret ; l'échec reste sans conséquence,
           # une annonce non enrichie garde une note neutre sur les travaux.
-          ENRICH_MAX:           "20"
+          ENRICH_MAX:           "10"
         run: python main.py --once
+ 
