@@ -413,6 +413,60 @@ verifier("annonce neutre", detecter_travaux({"titre": "Appartement 2 pièces 34 
 affirmer("les termes déclencheurs sont restituables",
          "à rénover" in mots_travaux_trouves({"titre": "Dernier étage à rénover"}))
 
+print("\n── Lecture d'une page PAP ───────────────────────────────────────")
+from enricher import _appliquer_page_pap, date_publication_pap, corps_utile_pap
+from zone_filter import est_dans_zone, repere_butte
+
+# Reconstitution de la page relevée le 07/09/2026 sur l'annonce r446300186,
+# mise à plat comme le fait _texte_page(). Cette annonce était la mieux notée
+# de toute la base : 52 m² à 6 731 €/m², marge +40,4 %. Sa page révèle qu'elle
+# est à Marx Dormoy / Porte de la Chapelle — le mail d'alerte, lui, n'écrivait
+# que « Paris 18e ».
+PAGE_PAP = (
+    "PAP.fr Publier une annonce Acheter Vendre Louer "
+    "Vente appartement 3 pièces 52 m² Paris 18E (75018) 350.000 € "
+    "Réf. : E63/0186 / Publié le 06 septembre 2026 "
+    "350.000 € À partir de 1 555 € / mois "
+    "Paris 18e (75018) 3 pièces 2 chambres 52 m² 6.731 € le m² "
+    "Proximité immédiate des commerces et des écoles. Appartement de 3 pièces "
+    "très lumineux. Peinture et fenêtres double vitrage refaites à neuf. "
+    "Charges : 210€ / mois avec chauffage collectif. "
+    "Marx Dormoy Porte de la Chapelle Colette Besson "
+    "Que pensez-vous du prix ? Imprimer la fiche de visite Plan du site")
+
+
+def annonce_pap(page):
+    a = {"titre": "Vente appartement 3 pièces", "adresse": "Paris 18e",
+         "description": "", "url": "https://www.pap.fr/annonces/-r446300186"}
+    _appliquer_page_pap(a, page)
+    return a
+
+
+verifier("la date de publication est lue sur la page",
+         date_publication_pap(PAGE_PAP)[:10], "2026-09-06")
+
+hors = annonce_pap(PAGE_PAP)
+affirmer("les stations desservantes entrent dans l'adresse",
+         "Marx Dormoy" in hors["adresse"], hors["adresse"])
+verifier("l'annonce sort du périmètre une fois la page lue",
+         est_dans_zone(hors), False)
+affirmer("la description commence au texte du vendeur, pas à la navigation",
+         hors["description"].startswith("Proximité immédiate"),
+         hors["description"][:40])
+
+# Contre-épreuve : la même page, desservie par des stations de la Butte.
+sur_butte = annonce_pap(PAGE_PAP.replace(
+    "Marx Dormoy Porte de la Chapelle Colette Besson",
+    "Abbesses Lamarck-Caulaincourt Blanche"))
+verifier("une annonce PAP réellement sur la Butte est conservée",
+         est_dans_zone(sur_butte), True)
+verifier("et elle gagne son repère",
+         repere_butte(sur_butte), "lamarck caulaincourt")
+
+# Le pied de page ne doit pas peser : « Plan du site » borne la lecture.
+affirmer("le hors-sujet de bas de page est écarté",
+         "Plan du site" not in corps_utile_pap(PAGE_PAP))
+
 print("\n" + "=" * 64)
 if echecs:
     print(f"{len(echecs)} test(s) en échec : " + ", ".join(echecs))

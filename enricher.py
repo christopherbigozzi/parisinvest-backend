@@ -12,11 +12,14 @@ travaux.
 """
 import random
 import re
+import unicodedata
+from datetime import datetime, timezone
 import time
 
 import requests
 from bs4 import BeautifulSoup
 
+from zone_filter import lieux_reconnus
 from config import ENRICH_MAX
 
 DELAI_ENTRE_APPELS = (2.0, 4.5)   # secondes, tiré au hasard dans l'intervalle
@@ -37,6 +40,37 @@ DOMAINES_SANS_PAGE = ("click.by.seloger.com",)
 # rien à lire. Son propre front s'alimente à cette ressource, qui rend le DPE,
 # l'étage et la description sans exécuter le moindre script.
 RE_BIENICI_ID = re.compile(r"bienici\.com/annonce/([\w\-]+)", re.I)
+
+# ─── Pages PAP ───────────────────────────────────────────────────────────────
+# Relevé sur https://www.pap.fr/annonces/appartement-paris-18e-75018-r446300186
+# le 07/09/2026. La page se lit sans navigateur — pas de rendu JavaScript, pas
+# de blocage — et sa structure est stable :
+#
+#     Réf. : E63/0186 / Publié le 06 septembre 2026
+#     …titre, prix, caractéristiques…
+#     …texte du vendeur…
+#     Marx Dormoy · Porte de la Chapelle · Colette Besson   ← stations
+#     Que pensez-vous du prix ?                             ← début du hors-sujet
+#
+# Deux gisements que le mail d'alerte ne donne pas : la liste des stations,
+# seule localisation exploitable d'une annonce PAP, et la date de publication
+# réelle, qui vaut mieux que la date de réception du mail.
+RE_PAP = re.compile(r"pap\.fr/annonces?/", re.I)
+
+# Fin du contenu utile : au-delà commencent sondage, formulaires et pied de
+# page. On coupe avant, pour ne pas prendre un lieu cité hors de l'annonce.
+RE_FIN_PAP = re.compile(
+    r"(Que pensez[\s\-]?vous|Imprimer la fiche|Plan du site|Mentions l[ée]gales|"
+    r"Fil d.ariane|Nos autres annonces)", re.I)
+
+MOIS = {"janvier": 1, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
+        "juillet": 7, "aout": 8, "septembre": 9, "octobre": 10,
+        "novembre": 11, "decembre": 12}
+# Dernière ligne du bloc de caractéristiques : « 6.731 € le m² ».
+RE_PRIX_M2_PAP = re.compile(r"[\d.,\s]{3,12}€\s*(?:le|/)\s*m[²2]", re.I)
+
+RE_PUBLIE_PAP = re.compile(
+    r"Publi[ée]\s+le\s+(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})", re.I)
 BIENICI_JSON = "https://www.bienici.com/realEstateAd.json?id={}"
 
 
@@ -153,6 +187,32 @@ def extraire_pieces(texte):
     return int(m.group(1)) if m else 0
 
 
+def corps_utile_pap(texte):
+    """Le texte de la page privé de tout ce qui suit l'annonce elle-même."""
+    m = RE_FIN_PAP.search(texte)
+    return texte[:m.start()] if m else texte
+
+
+def date_publication_pap(texte):
+    """« Publié le 06 septembre 2026 » → « 2026-09-06 », ou "" si absent."""
+    m = RE_PUBLIE_PAP.search(texte)
+    if not m:
+        return ""
+    mois = MOIS.get(_sans_accent(m.group(2)).lower())
+    if not mois:
+        return ""
+    try:
+        return datetime(int(m.group(3)), mois, int(m.group(1)),
+                        tzinfo=timezone.utc).isoformat()
+    except ValueError:
+        return ""
+
+
+def _sans_accent(texte):
+    texte = unicodedata.normalize("NFD", str(texte or ""))
+    return "".join(c for c in texte if unicodedata.category(c) != "Mn")
+
+
 def extraire_description(texte, longueur=1200):
     """
     Faute de sélecteur fiable et commun aux quatre portails, on prend le texte
@@ -220,11 +280,59 @@ def enrichir(annonce, session=None):
         if not annonce.get("description"):
             annonce["description"] = extraire_description(texte)
 
+        if RE_PAP.search(url):
+            _appliquer_page_pap(annonce, texte)
+
     except requests.RequestException as e:
         print(f"  [Enrich] Échec réseau {url[:60]} : {type(e).__name__}")
     except Exception as e:
         print(f"  [Enrich] Erreur {url[:60]} : {e}")
 
+    return annonce
+
+
+def _texte_vendeur_pap(corps):
+    """Le corps de page privé de son en-tête de navigation."""
+    for ancre in (RE_PRIX_M2_PAP, RE_PUBLIE_PAP):
+        m = ancre.search(corps)
+        if m:
+            return corps[m.end():].strip()
+    return corps
+
+
+def _appliquer_page_pap(annonce, texte):
+    """
+    Verse dans l'annonce ce que seule la page PAP contient.
+
+    Les stations sont écrites dans l'adresse et non dans la description : le
+    filtre de zone comme le dashboard lisent ce champ, et « Marx Dormoy,
+    Porte de la Chapelle » y est plus parlant qu'un « Paris 18e » muet.
+    Ce sont des stations *desservant* le bien, pas son adresse — mais c'est
+    tout ce que PAP consent à donner, et c'est déjà décisif.
+    """
+    corps = corps_utile_pap(texte)
+
+    # La description du vendeur, et elle seule : le haut de page est occupé
+    # par la navigation du site, où « à rénover » ne veut rien dire. Le bloc
+    # de caractéristiques se termine par « 6.731 € le m² », qui sert d'ancre.
+    annonce["description"] = extraire_description(_texte_vendeur_pap(corps), 3000)
+
+    hors, butte = lieux_reconnus(corps)
+    lieux = hors or butte
+    if lieux:
+        libelles = ", ".join(l.title() for l in lieux)
+        adresse = str(annonce.get("adresse") or "").strip()
+        if adresse and libelles.lower() not in adresse.lower():
+            annonce["adresse"] = f"{libelles} · {adresse}"[:150]
+        elif not adresse:
+            annonce["adresse"] = libelles[:150]
+
+    # La date du mail n'est pas celle de l'annonce : PAP réexpédie ses alertes
+    # et le rejeu du 07/09/2026 a fait passer des biens de trois semaines pour
+    # des nouveautés. La page, elle, date l'annonce.
+    publiee = date_publication_pap(corps)
+    if publiee:
+        annonce["date_publi"] = publiee
     return annonce
 
 

@@ -342,6 +342,37 @@ def lieu_hors_zone(texte):
     return any(f" {_aplatir(lieu).strip()} " in plat for lieu in LIEUX_HORS_ZONE)
 
 
+def lieux_reconnus(texte, maximum=4):
+    """
+    Les lieux connus cités dans un texte, séparés en deux listes :
+    (hors zone, Butte). Sert à l'enrichissement, qui lit la page de l'annonce
+    et y trouve ce que le mail d'alerte ne disait pas.
+
+    PAP affiche sous sa description la liste des stations desservant le bien —
+    « Marx Dormoy, Porte de la Chapelle, Colette Besson » — sans jamais donner
+    de rue. C'est la seule localisation exploitable de ces annonces, et elle
+    est décisive : le mail, lui, n'écrit que « Paris 18e ».
+
+    Le terme le plus long l'emporte, et un terme déjà couvert par un autre
+    n'est pas répété : « porte de la chapelle » suffit, « la chapelle » ne
+    l'accompagne pas.
+    """
+    plat = _aplatir(texte)
+    hors, butte = [], []
+    connus = sorted(set(LIEUX_HORS_ZONE) | set(RUES_BUTTE) | set(REPERES_BUTTE),
+                    key=len, reverse=True)
+    for lieu in connus:
+        cle = _aplatir(lieu).strip()
+        if f" {cle} " not in plat:
+            continue
+        if any(cle in deja for deja in hors + butte):
+            continue
+        (hors if lieu in LIEUX_HORS_ZONE else butte).append(cle)
+        if len(hors) + len(butte) >= maximum:
+            break
+    return hors, butte
+
+
 def motif_exclusion(texte):
     """Renvoie le terme qui a fait rejeter l'annonce, pour pouvoir l'expliquer."""
     plat = _aplatir(texte)

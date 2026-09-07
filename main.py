@@ -207,6 +207,11 @@ def run():
         annonce["a_travaux"] = detecter_travaux(annonce)
         # Persisté pour que le dashboard applique la même pénalité que le
         # worker sans embarquer les listes de rues en JavaScript.
+        # L'enrichissement a pu corriger la date de publication — PAP la donne
+        # sur sa page, et elle diffère de la date du mail dès qu'une alerte
+        # est réexpédiée. La fraîcheur se recalcule donc ici, pas dans
+        # preparer(), qui s'exécute avant la lecture de la page.
+        annonce["jours_en_ligne"] = _anciennete_en_jours(annonce.get("date_publi"))
         annonce["repere_butte"] = repere_butte(annonce)
         annonce["localisation_verifiee"] = bool(annonce["repere_butte"])
         annonce["score"] = calculer_score(annonce, zone=ZONE, score_ml=score_ml)
