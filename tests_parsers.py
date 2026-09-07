@@ -291,6 +291,69 @@ if resultat_html:
     verifier("identifiant retrouvé dans le lien tracé",
              resultat_html[0]["ident"], "immo-facile-61357036")
 
+print("\n── PAP ──────────────────────────────────────────────────────────")
+# Trois pièges cumulés, tous constatés sur les vrais mails du 07/09/2026 :
+#   — le prix est écrit « 185.000 EUR », sans signe euro et avec le point
+#     comme séparateur de milliers ;
+#   — une ligne rappelle le critère de recherche (« de 12 à 70 m² ») avant
+#     l'annonce, et RE_SURFACE retient la première surface du bloc ;
+#   — la signature légale contient « SAS au capital de 337 800 euros ».
+# Chacun suffisait à faire disparaître l'annonce ou à la fausser.
+MAIL_PAP = """PAP.fr De Particulier à Particulier
+____________________________________________________________
+
+Une annonce correspondant à votre recherche Vente appartement, maison Paris 18e {critere}.
+
+Vente {type_bien}
+Paris 18e
+{surface} m²
+{prix} EUR
+
+Pour voir l'annonce, suivez ce lien :
+https://www.pap.fr/annonces/-{ref}?a=62228874&email=parisinvest18%40gmail.com&md5=276c15c9&utm_source=alerte_vente
+
+Se désinscrire :
+https://www.pap.fr/utilisateur/alertes?email=parisinvest18%40gmail.com&md5=276c15c9
+
+--
+De Particulier à Particulier
+SAS au capital de 337 800 euros
+RC 75 B 6752
+SIRET 304 555 154 00232
+APE 5814 Z"""
+
+
+def mail_pap(critere, type_bien, surface, prix, ref):
+    return {"id": "pap-" + ref, "source": "pap", "date": None, "html": "",
+            "sujet": "Alerte email : " + type_bien,
+            "texte": MAIL_PAP.format(critere=critere, type_bien=type_bien,
+                                     surface=surface, prix=prix, ref=ref)}
+
+
+for critere, type_bien, surface, prix, ref, prix_attendu, surface_attendue in (
+    ("de 12 à 70 m²",    "appartement 2 pièces", "27",  "185.000",   "r462301804", 185000.0, 27.0),
+    ("à partir de 12 m²", "appartement 5 pièces", "125", "1.100.000", "r463701264", 1100000.0, 125.0),
+    ("de 12 à 70 m²",    "studio",               "18",  "199.430",   "r461112233", 199430.0, 18.0),
+):
+    obtenu = parser_alerte(mail_pap(critere, type_bien, surface, prix, ref))
+    verifier(f"PAP {ref} : une annonce extraite", len(obtenu), 1)
+    if obtenu:
+        verifier(f"PAP {ref} : prix", obtenu[0]["prix"], prix_attendu)
+        verifier(f"PAP {ref} : surface", obtenu[0]["surface"], surface_attendue)
+        affirmer(f"PAP {ref} : le titre décrit le bien, pas la recherche",
+                 "recherche" not in obtenu[0]["titre"].lower(),
+                 obtenu[0]["titre"])
+
+# La même annonce arrive par deux alertes dont seul le critère diffère : les
+# deux doivent produire un titre identique, sans quoi l'identifiant calculé
+# diverge et l'annonce entre deux fois en base.
+a = parser_alerte(mail_pap("de 12 à 70 m²", "appartement 2 pièces", "27", "185.000", "r462301804"))
+b = parser_alerte(mail_pap("à partir de 12 m²", "appartement 2 pièces", "27", "185.000", "r462301804"))
+affirmer("PAP : deux alertes, une seule identité",
+         bool(a) and bool(b)
+         and (a[0]["titre"], a[0]["surface"], a[0]["prix"], a[0]["url"])
+             == (b[0]["titre"], b[0]["surface"], b[0]["prix"], b[0]["url"]))
+
 print("\n── Robustesse ───────────────────────────────────────────────────")
 vide = {"id": "x", "source": "bienici", "sujet": "vide", "date": None,
         "html": "", "texte": ""}

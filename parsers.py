@@ -33,7 +33,9 @@ from bs4 import BeautifulSoup
 
 # ─── Expressions communes ────────────────────────────────────────────────────
 # Les portails écrivent les prix avec des espaces insécables et fines.
-RE_PRIX = re.compile(r"(\d[\d    .]{2,12})\s*€")
+# PAP écrit ses prix « 185.000 EUR » dans la version texte du mail, sans le
+# signe euro : sans cette alternative, aucune annonce PAP n'est extraite.
+RE_PRIX = re.compile(r"(\d[\d    .]{2,12})\s*(?:€|EUR\b)", re.I)
 RE_SURFACE = re.compile(r"(\d{1,4}(?:[.,]\d{1,2})?)\s*m²", re.I)
 RE_PIECES = re.compile(r"(\d{1,2})\s*pi[èe]ces?", re.I)
 # La localisation occupe généralement sa propre ligne : « 75018 Paris 18e ».
@@ -44,9 +46,20 @@ RE_CP_VILLE = re.compile(r"^\s*(\d{5})\s+([A-Za-zÀ-ÿ][^\n\[]{0,40}?)\s*$", re.
 RE_CP_VILLE_LARGE = re.compile(r"\b(\d{5})\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9' \-]{0,30})")
 RE_REFERENCE = re.compile(r"R[ÉE]F[ÉE]RENCE\s*:?\s*([A-Za-z0-9/\-_]+)", re.I)
 RE_TITRE = re.compile(
-    r"^((?:Appartement|Maison|Studio|Loft|Duplex|Immeuble|Local|Terrain|Villa|Ch[âa]teau)"
+    r"^((?:Vente|Achat|Location)?\s*"
+    r"(?:Appartement|Maison|Studio|Loft|Duplex|Immeuble|Local|Terrain|Villa|Ch[âa]teau)"
     r"[^\n]{0,120})$",
     re.I | re.M,
+)
+
+# Lignes de rappel du critère d'alerte : elles nomment un type de bien et une
+# surface, mais décrivent la recherche, pas le bien. PAP en met une en tête de
+# chaque mail — prise pour titre, elle fait aussi diverger l'identifiant entre
+# deux alertes portant sur la même annonce, donc des doublons en base.
+RE_LIGNE_CRITERE = re.compile(
+    r"(votre recherche|correspondant?e?s? à votre|vos crit[èe]res|"
+    r"retrouvez toutes les annonces)",
+    re.I,
 )
 
 TYPES_BIEN = re.compile(
@@ -271,6 +284,12 @@ def _nombre(brut):
     propre = re.sub(r"[^\d,.]", "", str(brut).replace(",", "."))
     if propre.count(".") > 1:  # séparateur de milliers pris pour une décimale
         propre = propre.replace(".", "")
+    # Un point suivi d'exactement trois chiffres est un séparateur de milliers,
+    # pas une décimale : PAP écrit « 185.000 » là où les autres écrivent
+    # « 185 000 ». Deux décimales ou moins restent des décimales, ce qui
+    # préserve les surfaces du genre « 32,03 m² ».
+    elif re.fullmatch(r"\d+\.\d{3}", propre):
+        propre = propre.replace(".", "")
     try:
         return float(propre)
     except ValueError:
@@ -363,6 +382,8 @@ def _extraire_titre(bloc):
     # Repli : première ligne mentionnant un type de bien
     for ligne in bloc.split("\n"):
         ligne = ligne.strip()
+        if RE_LIGNE_CRITERE.search(ligne):
+            continue
         if 8 < len(ligne) < 150 and TYPES_BIEN.search(ligne) and "http" not in ligne:
             return re.sub(r"\s+", " ", ligne)[:150]
     return ""
@@ -412,8 +433,26 @@ def _photos_par_ident(texte, motif_photo):
     return photos
 
 
+def _sans_lignes_critere(bloc):
+    """
+    Retire les lignes qui rappellent le critère d'alerte plutôt que de décrire
+    le bien. Sans cela, « Vente appartement Paris 18e de 12 à 70 m² » donne une
+    surface de 12 m² à toutes les annonces PAP : RE_SURFACE retient la première
+    du bloc, et cette ligne précède l'annonce.
+    """
+    lignes = bloc.split("\n")
+    # Délimiteur de signature normalisé : tout ce qui suit relève des mentions
+    # légales (capital social, SIRET), jamais de l'annonce.
+    for i, l in enumerate(lignes):
+        if l.strip() == "--":
+            lignes = lignes[:i]
+            break
+    return "\n".join(l for l in lignes if not RE_LIGNE_CRITERE.search(l))
+
+
 def parser_bloc(ident, bloc, source, config):
     sans_identifiant = ident is None
+    bloc = _sans_lignes_critere(bloc)
     prix = _extraire_prix(bloc)
 
     if sans_identifiant:
