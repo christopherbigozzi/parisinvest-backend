@@ -360,7 +360,7 @@ def lieux_reconnus(texte, maximum=4):
     plat = _aplatir(texte)
     hors, butte = [], []
     connus = sorted(set(LIEUX_HORS_ZONE) | set(RUES_BUTTE) | set(REPERES_BUTTE),
-                    key=len, reverse=True)
+                    key=lambda t: (-len(t), t))
     for lieu in connus:
         cle = _aplatir(lieu).strip()
         if f" {cle} " not in plat:
@@ -376,7 +376,7 @@ def lieux_reconnus(texte, maximum=4):
 def motif_exclusion(texte):
     """Renvoie le terme qui a fait rejeter l'annonce, pour pouvoir l'expliquer."""
     plat = _aplatir(texte)
-    for lieu in sorted(LIEUX_HORS_ZONE, key=len, reverse=True):
+    for lieu in sorted(LIEUX_HORS_ZONE, key=lambda t: (-len(t), t)):
         if f" {_aplatir(lieu).strip()} " in plat:
             return lieu
     return ""
@@ -426,7 +426,7 @@ def repere_butte(annonce):
 
     plat = _aplatir(texte)
     candidats = set(RUES_BUTTE) | set(QUARTIERS_ZONE) | set(REPERES_BUTTE)
-    for repere in sorted(candidats, key=len, reverse=True):
+    for repere in sorted(candidats, key=lambda t: (-len(t), t)):
         if f" {_aplatir(repere).strip()} " in plat:
             return repere
     return ""

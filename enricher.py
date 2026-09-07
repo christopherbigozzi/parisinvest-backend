@@ -11,6 +11,7 @@ une annonce non enrichie garde simplement une note neutre sur le potentiel
 travaux.
 """
 import random
+import os
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -23,6 +24,22 @@ from zone_filter import lieux_reconnus
 from config import ENRICH_MAX
 
 DELAI_ENTRE_APPELS = (2.0, 4.5)   # secondes, tiré au hasard dans l'intervalle
+
+# ─── Relais de pages ─────────────────────────────────────────────────────────
+# PAP ne répond pas aux runners GitHub : plages d'IP partagées et connues.
+# Constaté le 07/09/2026 sur 39 annonces recollectées — zéro description, zéro
+# DPE, zéro adresse — alors que Bien'ici passait sans encombre depuis la même
+# machine par son endpoint JSON. Le réseau du runner fonctionne ; c'est PAP
+# qui refuse cette adresse.
+#
+# On repasse donc par la fonction serverless /api/page du front, hébergée sur
+# Vercel, dont les IP ne sont pas bannies. Le relais n'est sollicité qu'en
+# second recours : une requête directe qui aboutit ne coûte rien à personne.
+#
+# Les deux variables sont facultatives. Sans elles, le comportement est
+# exactement celui d'avant — un échec reste un échec, jamais une exception.
+PAGE_PROXY_URL = os.getenv("PAGE_PROXY_URL", "").rstrip("/")
+PAGE_PROXY_CLE = os.getenv("PAGE_PROXY_CLE", "")
 TIMEOUT            = 12
 
 # Domaines qui ne mènent pas à une page d'annonce. Les alertes SeLoger ne
@@ -251,13 +268,11 @@ def enrichir(annonce, session=None):
         return annonce
 
     try:
-        _pause()
-        rep = sess.get(url, headers=ENTETES, timeout=TIMEOUT, allow_redirects=True)
-        if rep.status_code != 200:
-            print(f"  [Enrich] {rep.status_code} sur {url[:70]}")
+        html = _recuperer_page(url, sess)
+        if not html:
             return annonce
 
-        texte = _texte_page(rep.text)
+        texte = _texte_page(html)
         if len(texte) < 200:
             print(f"  [Enrich] Page vide ou bloquée : {url[:70]}")
             return annonce
@@ -283,8 +298,6 @@ def enrichir(annonce, session=None):
         if RE_PAP.search(url):
             _appliquer_page_pap(annonce, texte)
 
-    except requests.RequestException as e:
-        print(f"  [Enrich] Échec réseau {url[:60]} : {type(e).__name__}")
     except Exception as e:
         print(f"  [Enrich] Erreur {url[:60]} : {e}")
 
@@ -298,6 +311,54 @@ def _texte_vendeur_pap(corps):
         if m:
             return corps[m.end():].strip()
     return corps
+
+
+def _recuperer_page(url, sess):
+    """
+    Le HTML de la page, ou "" si elle reste hors d'atteinte.
+
+    Deux tentatives : d'abord en direct, puis par le relais Vercel si le
+    portail a refusé. Le relais n'est essayé que sur un refus franc ou une
+    erreur réseau — pas sur une page vide, qui relève d'autre chose.
+    """
+    directe = _tenter(url, sess)
+    if directe:
+        return directe
+
+    if not (PAGE_PROXY_URL and PAGE_PROXY_CLE):
+        return ""
+
+    relais = f"{PAGE_PROXY_URL}/api/page"
+    print(f"  [Enrich] Refus direct, passage par le relais : {url[:60]}")
+    _pause()
+    try:
+        rep = sess.get(relais, params={"url": url, "cle": PAGE_PROXY_CLE},
+                       timeout=TIMEOUT + 8)
+        if rep.status_code == 200:
+            return rep.text
+        detail = ""
+        try:
+            detail = rep.json().get("erreur", "")
+        except Exception:
+            pass
+        print(f"  [Enrich] Relais {rep.status_code} {detail} sur {url[:55]}")
+    except requests.RequestException as e:
+        print(f"  [Enrich] Relais injoignable : {type(e).__name__}")
+    return ""
+
+
+def _tenter(url, sess):
+    """Une requête directe. Retourne le HTML, ou "" sans jamais lever."""
+    try:
+        _pause()
+        rep = sess.get(url, headers=ENTETES, timeout=TIMEOUT,
+                       allow_redirects=True)
+        if rep.status_code == 200:
+            return rep.text
+        print(f"  [Enrich] {rep.status_code} sur {url[:70]}")
+    except requests.RequestException as e:
+        print(f"  [Enrich] Échec réseau {url[:60]} : {type(e).__name__}")
+    return ""
 
 
 def _appliquer_page_pap(annonce, texte):
