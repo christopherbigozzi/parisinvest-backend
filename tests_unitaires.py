@@ -478,6 +478,37 @@ verifier("et elle gagne son repère",
 affirmer("le hors-sujet de bas de page est écarté",
          "Plan du site" not in corps_utile_pap(PAGE_PAP))
 
+print("\n── Rez-de-chaussée ──────────────────────────────────────────────")
+# Toutes les graphies relevées dans les annonces, plus les formulations qui
+# l'annoncent sans le nommer.
+for texte in ("RDC sur cour", "R.D.C. avec jardin", "R.D.C", "RdC surélevé",
+              "Appartement en rez de chaussée", "Rez-de-chaussée refait à neuf",
+              "Rez de jardin plein sud", "Maison de plain-pied",
+              "Studio au rez, sur cour", "Appartement niveau 0",
+              "Étage 0 avec terrasse"):
+    affirmer(f"écarté : {texte}",
+             est_rez_de_chaussee({"titre": texte, "description": ""}))
+
+for texte in ("Beau 2 pièces 3e étage", "Dernier étage sans vis-à-vis",
+              "Rue du Rendez-vous", "Studio rue Marcadet"):
+    affirmer(f"conservé : {texte}",
+             not est_rez_de_chaussee({"titre": texte, "description": ""}))
+
+# Bien'ici rappelle le critère de recherche en tête de chaque alerte. Une
+# annonce qui hériterait de cette ligne serait écartée alors qu'elle dit
+# exactement l'inverse.
+for texte in ("Éviter le rez-de-chaussée",
+              "Zone personnalisée - 12 m² min - Éviter le rez-de-chaussée",
+              "Appartement sans rez-de-chaussée"):
+    affirmer(f"la négation est comprise : {texte[:42]}",
+             not est_rez_de_chaussee({"titre": texte, "description": ""}))
+
+# L'étage renseigné fait foi, quoi que dise le texte.
+verifier("l'étage du portail prime sur le texte",
+         est_rez_de_chaussee({"titre": "RDC sur cour", "etage": "3e"}), False)
+verifier("et il écarte quand il vaut RDC",
+         est_rez_de_chaussee({"titre": "Bel appartement", "etage": "RDC"}), True)
+
 print("\n" + "=" * 64)
 if echecs:
     print(f"{len(echecs)} test(s) en échec : " + ", ".join(echecs))

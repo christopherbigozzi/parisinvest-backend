@@ -164,9 +164,24 @@ RE_SURFACES_TITRE = re.compile(r"(\d{1,4}(?:[.,]\d{1,2})?)\s*m[²2]", re.I)
 # Rez-de-chaussée : écarté sans condition. Sur la Butte, un RDC cumule la
 # nuisance de rue, l'insécurité et une décote à la revente que le modèle de
 # marge ne sait pas chiffrer.
+# Toutes les façons d'écrire un rez-de-chaussée relevées dans les annonces.
+# « R.D.C », « RdC », « rez de chaussée », « rez-de-jardin », mais aussi les
+# formulations d'agence qui l'annoncent sans le nommer : « au rez », « plain
+# pied », « de plain-pied », « niveau 0 », « étage 0 », « 0e étage ».
 RE_RDC = re.compile(
-    r"\b(rez[\s\-]?de[\s\-]?chauss[ée]{1,2}e?|r\.?d\.?c\.?|"
-    r"rez[\s\-]?de[\s\-]?jardin)\b",
+    r"(?:\b(?:rez[\s\-]?de[\s\-]?chauss[ée]{1,2}e?|rez[\s\-]?de[\s\-]?jardin"
+    r"|au\s+rez\b|de\s+plain[\s\-]?pied|plain[\s\-]?pied"
+    r"|niveau\s*0|[ée]tage\s*(?:num[ée]ro\s*)?0|0\s*(?:e|er|[èe]me)?\s*[ée]tage)\b)"
+    r"|(?:\bR\.?\s?D\.?\s?C\b\.?)",
+    re.I,
+)
+
+# Le piège inverse : Bien'ici rappelle en tête de chaque alerte le critère de
+# recherche — « Éviter le rez-de-chaussée ». Une annonce qui hériterait de
+# cette ligne serait écartée alors qu'elle dit exactement le contraire.
+RE_RDC_NIE = re.compile(
+    r"\b(?:[ée]viter|sans|pas\s+de|hors|exclure|except[ée])\s+"
+    r"(?:le\s+|un\s+)?rez[\s\-]?de[\s\-]?chauss",
     re.I,
 )
 
@@ -176,14 +191,22 @@ def est_rez_de_chaussee(annonce):
     Le bien est-il en rez-de-chaussée ?
 
     L'étage renseigné fait foi quand il existe — il vient de la fiche du
-    portail, pas d'une tournure de phrase. À défaut, on lit le texte : les
-    annonces SeLoger n'ont jamais d'étage, leur page étant inatteignable.
+    portail, pas d'une tournure de phrase. À défaut, on lit le texte.
+
+    À connaître : au 07/09/2026, 365 des 436 annonces actives n'ont aucun
+    étage renseigné, et pas une seule ne mentionne le rez-de-chaussée où que
+    ce soit. L'information n'existe ni dans les alertes SeLoger, ni dans
+    celles de PAP — seule la fiche Bien'ici la donne. Ce filtre ne peut donc
+    écarter que ce qu'on lui donne à lire ; le reste se découvre en ouvrant
+    l'annonce.
     """
     etage = str(annonce.get("etage") or "").strip().upper()
     if etage:
-        return etage in ("RDC", "0", "0E", "RDJ")
+        return etage in ("RDC", "0", "0E", "RDJ", "RDJ.", "REZ")
 
     texte = " ".join(str(annonce.get(c) or "") for c in ("titre", "description"))
+    if RE_RDC_NIE.search(texte):
+        return False
     return bool(RE_RDC.search(texte))
 
 
