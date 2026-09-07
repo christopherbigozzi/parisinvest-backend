@@ -49,6 +49,6 @@ jobs:
           # Leboncoin bloquent volontiers. On enrichit moins d'annonces par
           # passage pour rester discret ; l'échec reste sans conséquence,
           # une annonce non enrichie garde une note neutre sur les travaux.
-          ENRICH_MAX:           "10"
+          ENRICH_MAX:           "20"
         run: python main.py --once
  
