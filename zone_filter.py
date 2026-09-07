@@ -115,6 +115,63 @@ LIEUX_HORS_ZONE = {
     "saint lazare", "batignolles", "cardinet", "rome", "villiers",
     "stalingrad", "jaures", "colonel fabien", "belleville", "crimee",
     "porte de la villette", "corentin cariou", "laumiere",
+
+    # ── Saint-Ouen (93400) ───────────────────────────────────────────────────
+    # Ajouté le 07/09/2026 : « GRAND 2 PIÈCES / 45m2 / GARIBALDI / RUE DES
+    # ROSIERS » était en tête du classement, annoncé 75018 par SeLoger alors
+    # que la rue des Rosiers et le métro Garibaldi sont à Saint-Ouen. Seul
+    # « porte de saint ouen » figurait ici, ce qui ne couvrait pas la commune.
+    "saint ouen", "st ouen", "mairie de saint ouen", "garibaldi",
+    "rue des rosiers", "marche aux puces", "puces de saint ouen",
+    "biron", "vernaison", "serpette", "paul bert", "malassis",
+    "stade bauer", "docks de saint ouen", "albert dhalenne", "dhalenne",
+    "farcot", "ardoin", "debain", "eugene berthoud",
+
+    # ── Saint-Denis, Pleyel, La Plaine ───────────────────────────────────────
+    "saint denis", "st denis", "carrefour pleyel", "pleyel",
+    "stade de france", "plaine saint denis", "le landy", "landy",
+    "porte de paris",
+
+    # ── Clichy (92110), Levallois ────────────────────────────────────────────
+    # « clichy » seul couvre aussi l'avenue, le boulevard et la place de
+    # Clichy : aucune voie de la Butte ne porte ce nom, le raccourci est sûr.
+    "clichy", "mairie de clichy", "levallois", "anatole france",
+    "porte de clichy", "berthier",
+
+    # ── Aubervilliers, Pantin, La Villette ───────────────────────────────────
+    "quatre chemins", "front populaire", "fort d aubervilliers",
+    "pantin", "porte de pantin", "eglise de pantin", "rosa parks",
+    "macdonald", "canal de l ourcq",
+
+    # ── 18e nord : Portes, Chapelle International, Évangile ──────────────────
+    "porte montmartre", "porte de montmartre", "ornano",
+    "boulevard ornano", "charles hermite", "boucry", "tristan tzara",
+    "gaston tessier", "emile bollaert", "colette heilbronner",
+    "valentin abeille", "chapelle international", "hebert",
+    "rue de la chapelle", "boulevard de la chapelle",
+
+    # ── Goutte d'Or : compléments ────────────────────────────────────────────
+    "jessaint", "erckmann", "pierre l ermite", "la guadeloupe",
+    "eglise saint bernard", "rue de la goutte d or",
+
+    # ── 17e : Épinettes, Batignolles, Ternes ─────────────────────────────────
+    "porte de champerret", "bessieres", "navier", "pouchet", "saussure",
+    "legendre", "levis", "malesherbes", "wagram", "ternes", "courcelles",
+    "monceau",
+
+    # ── 9e : Martyrs, Anvers bas, Notre-Dame-de-Lorette ──────────────────────
+    "des martyrs", "rodier", "maubeuge", "condorcet", "turgot",
+    "bellefond", "milton", "lamartine", "chaussee d antin", "richer",
+
+    # ── 10e : gares, Château d'Eau, canal ────────────────────────────────────
+    "gare du nord", "gare de l est", "la fayette", "magenta",
+    "chateau d eau", "strasbourg saint denis", "louis blanc", "cail",
+    "tombouctou", "canal saint martin", "belzunce", "dunkerque",
+
+    # ── 19e : Flandre, Buttes-Chaumont, Danube ───────────────────────────────
+    "flandre", "avenue de flandre", "ourcq", "danube", "botzaris",
+    "place des fetes", "manin", "armand carrel", "mouzaia",
+    "buttes chaumont", "pre saint gervais",
 }
 
 # Conservée sous son ancien nom : d'autres modules l'importent peut-être.
